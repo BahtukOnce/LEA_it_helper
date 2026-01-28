@@ -548,6 +548,7 @@ def main_menu_keyboard(is_teacher_flag: bool) -> ReplyKeyboardMarkup:
                 KeyboardButton(text="📜 Запросы"),
                 KeyboardButton(text=ADMIN_FEEDBACK_TEXT),
             ],
+            [KeyboardButton(text="👋 Тест: привет")],
 
         ]
     else:
@@ -573,6 +574,12 @@ def main_menu_keyboard(is_teacher_flag: bool) -> ReplyKeyboardMarkup:
         keyboard=buttons,
         resize_keyboard=True,
     )
+
+@router.message(lambda m: m.text == "👋 Тест: привет")
+async def admin_test_hello(message: Message):
+    if not is_teacher(message):
+        return
+    await message.answer("Привет! 👋 Тестовая кнопка работает ✅")
 
 @router.message(lambda message: message.text == "➕ Слот")
 async def handle_add_slot_button(message: Message, state: FSMContext):
