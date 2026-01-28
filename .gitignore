@@ -1,0 +1,16 @@
+# Env файлы
+.env
+
+# Базы данных
+*.db
+
+# Python мусор
+__pycache__/
+*.pyc
+
+# Виртуальные окружения
+.venv/
+venv/
+
+# PyCharm
+.idea/
