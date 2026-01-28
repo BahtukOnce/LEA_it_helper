@@ -11122,6 +11122,7 @@ async def reminder_loop_with_extras():
             # Очистка старых системных флагов (старше 7 дней)
             week_ago = (now - timedelta(days=7)).isoformat()
             cur = conn.cursor()
+
             cur.execute(
                 "DELETE FROM system_flags WHERE updated_at < ?",
                 (week_ago,)
