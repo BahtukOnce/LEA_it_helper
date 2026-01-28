@@ -13217,7 +13217,7 @@ async def reschedule_extra_confirm(message: Message, state: FSMContext):
             old_time=original_time,
             new_date=new_date,
             new_time=new_time.strftime("%H:%M"),
-            topic=extra.get("topic")
+            topic=extra["topic"]
         )
 
     student_name = extra["full_name"] or extra["username"] or str(extra["telegram_id"])
