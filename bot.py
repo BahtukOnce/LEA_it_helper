@@ -121,20 +121,6 @@ conn.row_factory = sqlite3.Row
 BACK_TEXT = "⬅️ Назад"
 YES_TEXT = "✅ Да"
 FEEDBACK_TEXT = "💡 Предложения и исправления"
-
-
-DAY_NAMES = [
-    "Понедельник",
-    "Вторник",
-    "Среда",
-    "Четверг",
-    "Пятница",
-    "Суббота",
-    "Воскресенье",
-]
-
-# Константы для callback_data
-
 ADMIN_FEEDBACK_TEXT = "🛠️ Замечания"
 PAY_PREFIX = "pay_"
 BACK_CALLBACK = "back_to_history"
@@ -153,6 +139,21 @@ RESCHEDULE_OVERRIDE_PREFIX = "reschedule_override_"
 EDIT_HISTORY_PREFIX = "edit_history_"
 DELETE_HISTORY_PREFIX = "delete_history_"
 EDIT_HISTORY_FIELD_PREFIX = "edit_field_"
+
+
+DAY_NAMES = [
+    "Понедельник",
+    "Вторник",
+    "Среда",
+    "Четверг",
+    "Пятница",
+    "Суббота",
+    "Воскресенье",
+]
+
+# Константы для callback_data
+
+
 
 class SetTopicStates(StatesGroup):
     waiting_topic = State()
@@ -11285,7 +11286,7 @@ async def send_homework_reminders():
     today = now.date()
 
     # Проверяем, что текущее время в допустимом диапазоне (8:00 - 23:00)
-    if now.hour < 8 or now.hour >= 23:
+    if now.hour < 8 or now.hour > 23:
         return
 
     # Получаем все занятия на сегодня
