@@ -13041,14 +13041,22 @@ async def delete_extra_callback(callback_query: CallbackQuery):
 @router.callback_query(lambda c: c.data.startswith("reschedule_extra_"))
 async def reschedule_extra_callback(callback_query: CallbackQuery, state: FSMContext):
     """Начало процесса переноса дополнительного занятия"""
-    extra_id = int(callback_query.data[len("reschedule_extra_"):])
+
+    parts = callback_query.data.split("_")
+    # reschedule_extra_{extra_id}_{page}
+    extra_id = int(parts[2])
+    page = int(parts[3]) if len(parts) > 3 else 0  # если захочешь вернуть на нужную страницу
 
     if not is_teacher(callback_query):
         await callback_query.answer("Эта функция только для преподавателя.")
         return
 
-    # Получаем данные дополнительного занятия
     extra = get_extra_lesson_by_id(extra_id)
+    if not extra:
+        await callback_query.answer("Дополнительное занятие не найдено")
+        return
+
+    # дальше твой код без изменений...
     if not extra:
         await callback_query.answer("Дополнительное занятие не найдено")
         return
@@ -13232,8 +13240,8 @@ async def reschedule_extra_confirm(message: Message, state: FSMContext):
 
 @router.callback_query(lambda c: c.data.startswith("mark_extra_done_"))
 async def mark_extra_done_callback(callback_query: CallbackQuery):
-    """Отметка дополнительного занятия как выполненного"""
-    extra_id = int(callback_query.data[len("mark_extra_done_"):])
+    parts = callback_query.data.split("_")
+    extra_id = int(parts[3])  # mark_extra_done_{id}_{page} -> ["mark","extra","done","{id}","{page}"] если так сделаешь
 
     if not is_teacher(callback_query):
         await callback_query.answer("Эта функция только для преподавателя.")
