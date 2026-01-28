@@ -13040,12 +13040,9 @@ async def delete_extra_callback(callback_query: CallbackQuery):
 
 @router.callback_query(lambda c: c.data.startswith("reschedule_extra_"))
 async def reschedule_extra_callback(callback_query: CallbackQuery, state: FSMContext):
-    """Начало процесса переноса дополнительного занятия"""
-
     parts = callback_query.data.split("_")
-    # reschedule_extra_{extra_id}_{page}
     extra_id = int(parts[2])
-    page = int(parts[3]) if len(parts) > 3 else 0  # если захочешь вернуть на нужную страницу
+    page = int(parts[3]) if len(parts) > 3 else 0
 
     if not is_teacher(callback_query):
         await callback_query.answer("Эта функция только для преподавателя.")
@@ -13056,17 +13053,13 @@ async def reschedule_extra_callback(callback_query: CallbackQuery, state: FSMCon
         await callback_query.answer("Дополнительное занятие не найдено")
         return
 
-    # дальше твой код без изменений...
-    if not extra:
-        await callback_query.answer("Дополнительное занятие не найдено")
-        return
+    # (опционально) сохрани page, чтобы потом вернуться на нужную страницу
+    await state.update_data(reschedule_extra_page=page)
 
-    # Сохраняем ID занятия в состояние
     await state.update_data(reschedule_extra_id=extra_id)
     await state.update_data(reschedule_original_date=date.fromisoformat(extra["date"]))
     await state.update_data(reschedule_original_time=extra["time"])
 
-    # Устанавливаем состояние для ввода новой даты
     await state.set_state(RescheduleExtraStates.entering_date)
 
     await callback_query.message.answer(
