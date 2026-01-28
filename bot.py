@@ -1550,8 +1550,13 @@ def get_upcoming_lessons_for_student(student_id: int, days_ahead: int = 30):
             if l["student_id"] != student_id:
                 continue
             # отменённые переносить не надо
-            if l.get("change_kind") == "cancel":
-                continue
+            if l.get("change_kind") == "one_time":
+                items.append({
+                    "kind": "override",
+                    "override_id": l["override_id"],
+                    "date": d,
+                    "time": l["time"]
+                })
 
             # сохраняем "экземпляр занятия" = weekly_lesson_id + дата
             items.append({
@@ -1593,6 +1598,11 @@ def build_reschedule_lessons_kb(lessons):
             # resch_pick_weekly_{weekly_id}_{YYYY-MM-DD}
             cb = f"resch_pick_weekly_{item['weekly_lesson_id']}_{item['date'].isoformat()}"
             text = f"📅 {d_str} {time_str}"
+
+        elif item["kind"] == "override":
+            cb = f"resch_pick_override_{item['override_id']}"
+            text = f"🔁 {d_str} {time_str} (перенос)"
+
         else:
             # resch_pick_extra_{extra_id}
             cb = f"resch_pick_extra_{item['extra_id']}"
@@ -1605,6 +1615,28 @@ def build_reschedule_lessons_kb(lessons):
     builder.adjust(1)
     return builder.as_markup()
 
+
+@router.callback_query(lambda c: c.data.startswith("resch_pick_override_"))
+async def resch_pick_override(callback_query: CallbackQuery, state: FSMContext):
+    override_id = int(callback_query.data.split("_")[3])
+
+    ov = get_override_by_id(override_id)
+    if not ov:
+        await callback_query.answer("Перенос не найден")
+        return
+
+    await state.update_data(
+        resch_kind="override",
+        resch_override_id=override_id,
+        resch_old_date=date.fromisoformat(ov["date"]),
+        resch_old_time=ov["new_time"]
+    )
+
+    await state.set_state(RescheduleStates.entering_date)
+
+    await callback_query.message.edit_text(
+        "Введите новую дату для переноса перенесенного занятия:"
+    )
 
 @router.callback_query(lambda c: c.data.startswith("reschedule_page_"), RescheduleStates.choosing_student)
 async def reschedule_page_callback(callback_query: CallbackQuery, state: FSMContext):
@@ -1821,6 +1853,16 @@ async def resch_confirm(message: Message, state: FSMContext):
             )
         except Exception:
             pass
+
+    elif kind == "override":
+        override_id = data["resch_override_id"]
+
+        update_lesson_override(
+            override_id,
+            new_date,
+            new_time,
+            change_kind="one_time"
+        )
 
     else:
         extra_id = data["resch_extra_id"]
