@@ -11111,9 +11111,13 @@ async def reminder_loop_with_extras():
                 already_notified.update(kept)
 
             # Вечерний итог в 23:00 (один раз в день)
-            if now.hour == 23 and (last_logged_date != today):
-                await auto_summary_today_lessons(today)
-                last_logged_date = today
+            # Отправляем "после 23:00", чтобы не промахнуться по минутам/перезапускам
+            if (last_logged_date != today) and (now.hour > 23 or (now.hour == 23 and now.minute >= 0)):
+                try:
+                    await auto_summary_today_lessons(today)
+                    last_logged_date = today
+                except Exception as e:
+                    logging.error(f"Ошибка при отправке вечернего итога: {e}")
 
             # Очистка старых системных флагов (старше 7 дней)
             week_ago = (now - timedelta(days=7)).isoformat()
