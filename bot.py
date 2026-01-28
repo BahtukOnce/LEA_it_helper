@@ -1319,9 +1319,10 @@ def build_student_schedule_text(student_id: int) -> str:
         return f"📅 <b>Расписание ученика {name}</b>\n\nПока нет регулярных слотов."
 
     lines = [f"📅 <b>Расписание ученика {name}</b>\n"]
-    for row in weekly:
-        day = DAY_NAMES[row["weekday"]]  # у тебя уже есть DAY_NAMES
-        lines.append(f"• {day} — {row['time']}")
+
+    for i, row in enumerate(weekly, start=1):
+        day = DAY_NAMES[row["weekday"]]
+        lines.append(f"{i}) {day} — {row['time']}")
     return "\n".join(lines)
 
 
