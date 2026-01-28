@@ -1,0 +1,9 @@
+git add .
+
+$msg = Read-Host "Commit message"
+
+git commit -m "$msg"
+
+git push
+
+Write-Output "Done! Pushed to GitHub."
