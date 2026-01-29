@@ -1,7 +1,8 @@
 # Env файлы
 .env
 
-# Базы данных
+# SQLite DB
+LEA_it_bot.db
 *.db
 
 # Python мусор
@@ -14,3 +15,4 @@ venv/
 
 # PyCharm
 .idea/
+
