@@ -8314,7 +8314,8 @@ async def delslot_delete_lesson(callback_query: CallbackQuery, state: FSMContext
     text = (
         "✅ Слот удалён:\n"
         f"{weekday_to_name(deleted['weekday'])} {deleted['time']}\n"
-        f"Ученик: {deleted.get('full_name') or deleted.get('username') or deleted.get('telegram_id')}"
+        f"Ученик: {deleted['full_name'] or deleted['username'] or str(deleted['telegram_id'])}"
+
     )
     await callback_query.message.edit_text(text)
     await callback_query.answer("Удалено")
