@@ -22,6 +22,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+import logging
+...
+logging.info("Logger initialized")
+
+
 
 # ---------- ПАГИНАЦИЯ ----------
 
