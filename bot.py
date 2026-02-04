@@ -721,19 +721,26 @@ async def slot_enter_time(message: Message, state: FSMContext):
         )
         return
 
-    # вставка слота
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO weekly_lessons(student_id, weekday, time, remind_before_minutes, is_active)
-        VALUES (?, ?, ?, 60, 1)
-        """,
-        (student_id, weekday, t_str)
-    )
-    conn.commit()
+    # ✅ добавляем слот через функцию (там же есть проверка на дубликат)
+    student = add_weekly_slot(student_id, weekday, t_str)
+
+    if not student:
+        # слот уже существует (add_weekly_slot возвращает None)
+        await state.clear()
+        await message.answer(
+            "⚠️ Такой слот уже есть у ученика. Ничего не менял.",
+            reply_markup=main_menu_keyboard(True)
+        )
+        return
+
+    # ✅ уведомляем ученика о новом регулярном занятии
+    try:
+        await notify_new_regular_lesson(student["telegram_id"], weekday, t_str)
+    except Exception:
+        pass
 
     await state.clear()
-    await message.answer("✅ Слот добавлен.", reply_markup=main_menu_keyboard(True))
+    await message.answer("✅ Слот добавлен и ученик уведомлён.", reply_markup=main_menu_keyboard(True))
 
 
 @router.message(lambda m: m.text == "➕ Добавить занятие")
