@@ -8248,18 +8248,50 @@ async def cmd_delete_slot(message: Message, state: FSMContext):
         await message.answer("Пока нет ни одного ученика. Пусть они напишут боту /start.")
         return
 
-    ids = []
-    lines = ["У какого ученика удаляем слот? Выбери номер:"]
+    # сохраняем список в FSM, чтобы работала пагинация
+    await state.update_data(delete_slot_students=students)
 
-    for i, s in enumerate(students, start=1):
-        ids.append(s["id"])
-        name = format_student_title(s["full_name"], s["username"], s["telegram_id"])
+    # ⚠️ action_type сделаем отдельный, чтобы не конфликтовать с удалением пользователя и т.п.
+    keyboard, _ = create_action_keyboard(students, "delslot", page=0)
 
-        lines.append(f"{i}) {name} (ID={s['telegram_id']})")
+    await state.set_state(DeleteSlotStates.waiting_for_delete_slot_student_id)
 
-    await state.update_data(delete_slot_student_ids=ids)
-    await state.set_state(DeleteSlotStates.choosing_student)
-    await message.answer("\n".join(lines), reply_markup=back_keyboard())
+    await message.answer(
+        "🗑️ <b>Удаление слота</b>\n\nВыберите ученика:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+@router.callback_query(lambda c: c.data.startswith("delslot_student_"))
+async def delslot_select_student(callback_query: CallbackQuery, state: FSMContext):
+    # delslot_student_{student_id}_{page}
+    parts = callback_query.data.split("_")
+    student_id = int(parts[2])
+
+    await state.update_data(delete_slot_student_id=student_id)
+    await state.set_state(DeleteSlotStates.waiting_for_delete_slot_weekday)
+
+    await callback_query.message.edit_text(
+        "📅 На какой день недели удалить слот?",
+        reply_markup=slot_weekday_inline_kb()
+    )
+    await callback_query.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("delslot_page_"))
+async def delslot_page_callback(callback_query: CallbackQuery, state: FSMContext):
+    page = int(callback_query.data.split("_")[2])
+
+    data = await state.get_data()
+    students = data.get("delete_slot_students", [])
+    if not students:
+        await callback_query.answer("Нет учеников")
+        return
+
+    keyboard, _ = create_action_keyboard(students, "delslot", page=page)
+    await callback_query.message.edit_reply_markup(reply_markup=keyboard)
+    await callback_query.answer(f"Страница {page + 1}")
+
 
 
 @router.message(DeleteSlotStates.choosing_student)
