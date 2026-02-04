@@ -9672,6 +9672,11 @@ async def delete_student_confirm(message: Message, state: FSMContext):
 
     await state.clear()
 
+@router.message(lambda m: (m.text or "").strip() == "🗑️ Удалить слот")
+async def handle_delete_slot_button(message: Message, state: FSMContext):
+    await state.clear()
+    await cmd_delete_slot(message, state)  # переиспользуем /delete_slot
+
 
 # ---------- ГОРЯЧИЕ КНОПКИ НИЖНЕГО МЕНЮ ----------
 
