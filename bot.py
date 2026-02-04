@@ -106,7 +106,7 @@ TEACHER_IDS = {
     5629840688,
 }
 
-DB_PATH = "LEA_it_bot.db"
+DB_PATH = "data/LEA_it_bot.db"
 
 logging.basicConfig(level=logging.INFO)
 
