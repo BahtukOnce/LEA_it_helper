@@ -8297,10 +8297,10 @@ async def delslot_select_student(callback_query: CallbackQuery, state: FSMContex
 
 
 @router.callback_query(lambda c: c.data.startswith("delslot_lesson_"))
+@router.callback_query(lambda c: c.data.startswith("delslot_lesson_"))
 async def delslot_delete_lesson(callback_query: CallbackQuery, state: FSMContext):
     lesson_id = int(callback_query.data.split("_")[2])
 
-    # deactivate_weekly_lesson уже есть и делает UPDATE is_active=0 :contentReference[oaicite:3]{index=3}
     deleted = deactivate_weekly_lesson(lesson_id)
 
     await state.clear()
@@ -8310,15 +8310,23 @@ async def delslot_delete_lesson(callback_query: CallbackQuery, state: FSMContext
         await callback_query.answer()
         return
 
-    # deleted содержит w.* и full_name/time/weekday :contentReference[oaicite:4]{index=4}
+    # ✅ ДОБАВЛЕНО: уведомляем ученика об удалении регулярного слота
+    student_tg_id = deleted.get("telegram_id")
+    if student_tg_id:
+        await notify_slot_deleted(
+            student_telegram_id=student_tg_id,
+            weekday=deleted["weekday"],
+            time_str=deleted["time"],
+        )
+
     text = (
         "✅ Слот удалён:\n"
         f"{weekday_to_name(deleted['weekday'])} {deleted['time']}\n"
-        f"Ученик: {deleted['full_name'] or deleted['username'] or str(deleted['telegram_id'])}"
-
+        f"Ученик: {deleted.get('full_name') or deleted.get('username') or deleted.get('telegram_id')}"
     )
     await callback_query.message.edit_text(text)
     await callback_query.answer("Удалено")
+
 
 
 
