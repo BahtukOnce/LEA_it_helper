@@ -8254,7 +8254,7 @@ async def cmd_delete_slot(message: Message, state: FSMContext):
     # ⚠️ action_type сделаем отдельный, чтобы не конфликтовать с удалением пользователя и т.п.
     keyboard, _ = create_action_keyboard(students, "delslot", page=0)
 
-    await state.set_state(DeleteSlotStates.waiting_for_delete_slot_student_id)
+    await state.set_state(DeleteSlotStates.choosing_student)
 
     await message.answer(
         "🗑️ <b>Удаление слота</b>\n\nВыберите ученика:",
