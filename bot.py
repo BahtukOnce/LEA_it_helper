@@ -644,6 +644,8 @@ async def slot_pick_weekday(callback_query: CallbackQuery, state: FSMContext):
     await callback_query.answer()
 
 
+
+
 @router.callback_query(lambda c: c.data.startswith("slot_page_"))
 async def slot_page_callback(callback_query: CallbackQuery, state: FSMContext):
     page = int(callback_query.data.split("_")[2])
