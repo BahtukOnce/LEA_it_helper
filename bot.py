@@ -621,15 +621,25 @@ async def slot_select_student(callback_query: CallbackQuery, state: FSMContext):
     await state.set_state(SetSlotStates.waiting_weekday)
 
     await callback_query.message.edit_text(
-        "📅 На какой день недели поставить слот?\n\n"
-        "1 — Понедельник\n"
-        "2 — Вторник\n"
-        "3 — Среда\n"
-        "4 — Четверг\n"
-        "5 — Пятница\n"
-        "6 — Суббота\n"
-        "7 — Воскресенье\n\n"
-        "Отправь цифру 1–7."
+        "📅 На какой день недели поставить слот?",
+        reply_markup=slot_weekday_inline_kb()
+    )
+
+    await callback_query.answer()
+
+@router.callback_query(lambda c: c.data.startswith("slot_weekday_"), SetSlotStates.waiting_weekday)
+async def slot_pick_weekday(callback_query: CallbackQuery, state: FSMContext):
+    wd = int(callback_query.data.split("_")[2])  # slot_weekday_{0..6}
+
+    await state.update_data(slot_weekday=wd)
+    await state.set_state(SetSlotStates.waiting_time)
+
+    await callback_query.message.edit_text(
+        "Во сколько? Введи время в формате HH:MM, например 18:30."
+    )
+    await callback_query.message.answer(
+        "Можно отменить кнопкой «Назад».",
+        reply_markup=back_keyboard()
     )
     await callback_query.answer()
 
@@ -6402,6 +6412,26 @@ async def start_set_hw_wizard(message: Message, state: FSMContext):
     await state.update_data(student_ids=ids)
     await state.set_state(HomeworkStates.waiting_user)
     await message.answer("\n".join(lines), reply_markup=back_keyboard())
+
+
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+DAY_BUTTONS = [
+    ("Пн", 0),
+    ("Вт", 1),
+    ("Ср", 2),
+    ("Чт", 3),
+    ("Пт", 4),
+    ("Сб", 5),
+    ("Вс", 6),
+]
+
+def slot_weekday_inline_kb():
+    b = InlineKeyboardBuilder()
+    for title, wd in DAY_BUTTONS:
+        b.button(text=title, callback_data=f"slot_weekday_{wd}")
+    b.adjust(4, 3)  # 4 кнопки в ряд, затем 3
+    return b.as_markup()
 
 
 # ---------- ДОМАШКА: /set_hw ----------
