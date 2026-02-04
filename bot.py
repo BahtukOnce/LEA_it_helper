@@ -2046,14 +2046,7 @@ async def hw_page_callback(callback_query: CallbackQuery, state: FSMContext):
 def init_db():
     cur = conn.cursor()
 
-    # Backfill: все, кто уже есть в students, но без роли — считаем учениками
-    cur.execute("""
-        INSERT OR IGNORE INTO user_roles(telegram_id, role, created_at)
-        SELECT telegram_id, 'student', ?
-        FROM students
-        WHERE telegram_id IS NOT NULL
-    """, (datetime.now().isoformat(timespec="seconds"),))
-    conn.commit()
+
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS user_roles (
@@ -2259,6 +2252,15 @@ def init_db():
            -- created_at может отсутствовать в старой БД, добавим миграцией ниже
        )
        """)
+    conn.commit()
+
+    # Backfill: все, кто уже есть в students, но без роли — считаем учениками
+    cur.execute("""
+         INSERT OR IGNORE INTO user_roles(telegram_id, role, created_at)
+         SELECT telegram_id, 'student', ?
+         FROM students
+         WHERE telegram_id IS NOT NULL
+     """, (datetime.now().isoformat(timespec="seconds"),))
     conn.commit()
 
     # ✅ МИГРАЦИЯ: если база старая и created_at нет — добавим
