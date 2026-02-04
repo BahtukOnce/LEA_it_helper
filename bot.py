@@ -8296,36 +8296,63 @@ async def delslot_select_student(callback_query: CallbackQuery, state: FSMContex
     await callback_query.answer()
 
 
-@router.callback_query(lambda c: c.data.startswith("delslot_lesson_"))
+
 @router.callback_query(lambda c: c.data.startswith("delslot_lesson_"))
 async def delslot_delete_lesson(callback_query: CallbackQuery, state: FSMContext):
-    lesson_id = int(callback_query.data.split("_")[2])
+    success = False
+    try:
+        lesson_id = int(callback_query.data.split("_")[2])
+        deleted = deactivate_weekly_lesson(lesson_id)
 
-    deleted = deactivate_weekly_lesson(lesson_id)
+        await state.clear()
 
-    await state.clear()
+        if not deleted:
+            await callback_query.message.edit_text("Не нашёл слот (возможно, уже удалён).")
+            return
 
-    if not deleted:
-        await callback_query.message.edit_text("Не нашёл слот (возможно, уже удалён).")
-        await callback_query.answer()
-        return
+        # данные слота (sqlite3.Row -> доступ по [])
+        student_tg_id = deleted["telegram_id"]
+        weekday = deleted["weekday"]
+        time_str = deleted["time"]
 
-    # ✅ ДОБАВЛЕНО: уведомляем ученика об удалении регулярного слота
-    student_tg_id = deleted.get("telegram_id")
-    if student_tg_id:
-        await notify_slot_deleted(
-            student_telegram_id=student_tg_id,
-            weekday=deleted["weekday"],
-            time_str=deleted["time"],
+        # ✅ уведомляем ученика (и не валим обработчик, если отправка не удалась)
+        if student_tg_id:
+            try:
+                await notify_slot_deleted(
+                    student_telegram_id=student_tg_id,
+                    weekday=weekday,
+                    time_str=time_str,
+                )
+            except Exception:
+                logging.exception("Не удалось отправить уведомление ученику о удалении слота")
+
+        student_label = (
+            deleted["full_name"]
+            or (f"@{deleted['username']}" if deleted["username"] else None)
+            or str(student_tg_id or "")
         )
 
-    text = (
-        "✅ Слот удалён:\n"
-        f"{weekday_to_name(deleted['weekday'])} {deleted['time']}\n"
-        f"Ученик: {deleted.get('full_name') or deleted.get('username') or deleted.get('telegram_id')}"
-    )
-    await callback_query.message.edit_text(text)
-    await callback_query.answer("Удалено")
+        await callback_query.message.edit_text(
+            "✅ Слот удалён:\n"
+            f"{weekday_to_name(weekday)} {time_str}\n"
+            f"Ученик: {student_label}"
+        )
+
+        # ✅ “уведомление админу” отдельным сообщением + меню
+        await callback_query.message.answer("✅ Готово.", reply_markup=main_menu_keyboard(True))
+
+        success = True
+
+    except Exception:
+        logging.exception("Ошибка при удалении слота (delslot_delete_lesson)")
+
+    finally:
+        # ✅ чтобы не было вечного “крутится…”
+        try:
+            await callback_query.answer("Удалено ✅" if success else "Ошибка ❌", show_alert=not success)
+        except Exception:
+            pass
+
 
 
 
