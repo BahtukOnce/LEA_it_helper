@@ -8262,6 +8262,9 @@ async def cmd_delete_slot(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
 
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import InlineKeyboardButton
+
 @router.callback_query(lambda c: c.data.startswith("delslot_student_"))
 async def delslot_select_student(callback_query: CallbackQuery, state: FSMContext):
     # delslot_student_{student_id}_{page}
@@ -8269,13 +8272,53 @@ async def delslot_select_student(callback_query: CallbackQuery, state: FSMContex
     student_id = int(parts[2])
 
     await state.update_data(delete_slot_student_id=student_id)
-    await state.set_state(DeleteSlotStates.waiting_for_delete_slot_weekday)
+
+    lessons = get_weekly_lessons_for_student(student_id, active_only=True)
+    if not lessons:
+        await state.clear()
+        await callback_query.message.edit_text("У этого ученика нет активных слотов — удалять нечего.")
+        await callback_query.answer()
+        return
+
+    kb = InlineKeyboardBuilder()
+    for wl in lessons:
+        # wl содержит w.* + full_name/username/telegram_id
+        text = f"{weekday_to_name(wl['weekday'])} {wl['time']}"
+        kb.add(InlineKeyboardButton(text=text, callback_data=f"delslot_lesson_{wl['id']}"))
+
+    # по 1 кнопке в строке (чтобы не было каши)
+    kb.adjust(1)
 
     await callback_query.message.edit_text(
-        "📅 На какой день недели удалить слот?",
-        reply_markup=slot_weekday_inline_kb()
+        "🗑️ Какой слот удалить? Выбери из списка:",
+        reply_markup=kb.as_markup(),
     )
     await callback_query.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("delslot_lesson_"))
+async def delslot_delete_lesson(callback_query: CallbackQuery, state: FSMContext):
+    lesson_id = int(callback_query.data.split("_")[2])
+
+    # deactivate_weekly_lesson уже есть и делает UPDATE is_active=0 :contentReference[oaicite:3]{index=3}
+    deleted = deactivate_weekly_lesson(lesson_id)
+
+    await state.clear()
+
+    if not deleted:
+        await callback_query.message.edit_text("Не нашёл слот (возможно, уже удалён).")
+        await callback_query.answer()
+        return
+
+    # deleted содержит w.* и full_name/time/weekday :contentReference[oaicite:4]{index=4}
+    text = (
+        "✅ Слот удалён:\n"
+        f"{weekday_to_name(deleted['weekday'])} {deleted['time']}\n"
+        f"Ученик: {deleted.get('full_name') or deleted.get('username') or deleted.get('telegram_id')}"
+    )
+    await callback_query.message.edit_text(text)
+    await callback_query.answer("Удалено")
+
 
 
 @router.callback_query(lambda c: c.data.startswith("delslot_page_"))
