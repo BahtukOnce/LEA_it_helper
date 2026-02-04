@@ -111,7 +111,7 @@ TEACHER_IDS = {
     5629840688,
 }
 
-DB_PATH = "data/LEA_it_bot.db"
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -120,7 +120,31 @@ dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 dp.include_router(router)
 
+# ✅ ФИКС ОШИБКИ "unable to open database file"
+
+import os
+import sqlite3
+
+# Папка, где лежит bot.py
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Создаём отдельную папку для базы данных (чтобы всё работало стабильно)
+DB_FOLDER = os.path.join(BASE_DIR, "database")
+
+# Если папки нет — создаём
+os.makedirs(DB_FOLDER, exist_ok=True)
+
+# Полный путь к файлу базы
+DB_PATH = os.path.join(DB_FOLDER, "LEA_it_bot.db")
+
+# Подключение SQLite (ошибка больше не появится)
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+
+# Чтобы можно было обращаться к строкам как к словарям
+conn.row_factory = sqlite3.Row
+
+print("✅ База данных подключена:", DB_PATH)
+
 conn.row_factory = sqlite3.Row
 
 BACK_TEXT = "⬅️ Назад"
@@ -2043,6 +2067,17 @@ async def hw_page_callback(callback_query: CallbackQuery, state: FSMContext):
 
 def init_db():
     cur = conn.cursor()
+
+    # ✅ СОЗДАНИЕ ТАБЛИЦЫ user_roles (если её ещё нет)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS user_roles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(telegram_id, role)
+    );
+    """)
 
     # Backfill: все, кто уже есть в students, но без роли — считаем учениками
     cur.execute("""
