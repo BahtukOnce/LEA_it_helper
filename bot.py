@@ -112,7 +112,6 @@ TEACHER_IDS = {
 }
 
 
-
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
