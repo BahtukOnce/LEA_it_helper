@@ -6,6 +6,7 @@ from typing import Optional
 from dotenv import load_dotenv
 import os
 
+
 from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.types import (
@@ -508,6 +509,23 @@ def add_history_time_keyboard_17_23() -> ReplyKeyboardMarkup:
     rows.append([KeyboardButton(text=BACK_TEXT)])
 
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
+def add_history_date_keyboard_last14(days: int = 14) -> ReplyKeyboardMarkup:
+    today = date.today()
+    buttons = [KeyboardButton(text=(today - timedelta(days=i)).strftime("%d.%m.%Y")) for i in range(days)]
+
+    rows = []
+    row_size = 4  # 4 кнопки в ряд (можешь поставить 3, если хочешь крупнее)
+    for i in range(0, len(buttons), row_size):
+        rows.append(buttons[i:i + row_size])
+
+    rows.append([KeyboardButton(text=BACK_TEXT)])  # назад отдельной строкой
+
+    return ReplyKeyboardMarkup(
+        keyboard=rows,
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
 
 
 @router.message(lambda message: message.text and message.text.isdigit() and 5 <= int(message.text) <= 20,
@@ -8585,9 +8603,8 @@ async def add_history_select_student(callback_query: CallbackQuery, state: FSMCo
 
     # дальше идём по твоему существующему сценарию ввода даты
     await callback_query.message.answer(
-        "Введите дату занятия (формат: ДД.ММ.ГГГГ или ДД.ММ):\n"
-        "Пример: 15.12.2024 или 15.12",
-        reply_markup=back_keyboard(),
+        "Выберите дату занятия (последние 14 дней) или введите вручную (ДД.ММ.ГГГГ / ДД.ММ):",
+        reply_markup=add_history_date_keyboard_last14(),
     )
 
     await callback_query.answer()
@@ -8647,10 +8664,9 @@ async def add_history_choose_student(message: Message, state: FSMContext):
     await state.update_data(add_history_student_id=student["id"])
     await state.set_state(AddManualHistoryStates.waiting_date)
 
-    await message.answer(
-        "Введите дату занятия (формат: ДД.ММ.ГГГГ или ДД.ММ):\n"
-        "Пример: 15.12.2024 или 15.12",
-        reply_markup=back_keyboard(),
+    await callback_query.message.answer(
+        "Выберите дату занятия (последние 14 дней) или введите вручную (ДД.ММ.ГГГГ / ДД.ММ):",
+        reply_markup=add_history_date_keyboard_last14(),
     )
 
 
@@ -8668,9 +8684,11 @@ async def add_history_enter_date(message: Message, state: FSMContext):
     lesson_date = parse_date_str(text)
     if not lesson_date:
         await message.answer(
-            "Дата должна быть в формате ДД.ММ.ГГГГ или ДД.ММ. Попробуй ещё раз.",
-            reply_markup=back_keyboard(),
+            "Дата должна быть в формате ДД.ММ.ГГГГ или ДД.ММ. "
+            "Выберите дату кнопкой (последние 14 дней) или введите вручную:",
+            reply_markup=add_history_date_keyboard_last14(),
         )
+
         return
 
     await state.update_data(add_history_date=lesson_date)
