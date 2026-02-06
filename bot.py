@@ -493,7 +493,7 @@ async def cmd_set_page_size(message: Message, state: FSMContext):
     await state.set_state("waiting_page_size")
 
 def add_history_time_keyboard_17_23() -> ReplyKeyboardMarkup:
-    times = [f"{h:02d}:00" for h in range(17, 24)]  # 17:00 ... 23:00
+    times = [f"{h:02d}:00" for h in range(12, 24)]  # 17:00 ... 23:00
 
     rows = []
     row = []
@@ -8698,7 +8698,7 @@ async def add_history_enter_time(message: Message, state: FSMContext):
         lesson_time = dtime(hh, mm)
     except Exception:
         await message.answer(
-            "Выберите время кнопкой (17:00–23:00) или введите вручную в формате ЧЧ:ММ.",
+            "Выберите время кнопкой (12:00–23:00) или введите вручную в формате ЧЧ:ММ.",
             reply_markup=add_history_time_keyboard_17_23(),
         )
         return
