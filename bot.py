@@ -30,7 +30,7 @@ logging.info("Logger initialized")
 
 # ---------- ПАГИНАЦИЯ ----------
 
-PAGE_SIZE = 16  # Элементов на странице
+PAGE_SIZE = 20  # Элементов на странице
 
 
 class RescheduleStates(StatesGroup):
