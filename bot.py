@@ -492,6 +492,23 @@ async def cmd_set_page_size(message: Message, state: FSMContext):
 
     await state.set_state("waiting_page_size")
 
+def add_history_time_keyboard_17_23() -> ReplyKeyboardMarkup:
+    times = [f"{h:02d}:00" for h in range(17, 24)]  # 17:00 ... 23:00
+
+    rows = []
+    row = []
+    for t in times:
+        row.append(KeyboardButton(text=t))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+
+    rows.append([KeyboardButton(text=BACK_TEXT)])
+
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
 
 @router.message(lambda message: message.text and message.text.isdigit() and 5 <= int(message.text) <= 20,
                 StateFilter("waiting_page_size"))
@@ -8660,9 +8677,8 @@ async def add_history_enter_date(message: Message, state: FSMContext):
     await state.set_state(AddManualHistoryStates.waiting_time)
 
     await message.answer(
-        "Введите время занятия (формат: ЧЧ:ММ):\n"
-        "Пример: 18:30",
-        reply_markup=back_keyboard(),
+        "Выберите время занятия:",
+        reply_markup=add_history_time_keyboard_17_23(),
     )
 
 
@@ -8682,8 +8698,8 @@ async def add_history_enter_time(message: Message, state: FSMContext):
         lesson_time = dtime(hh, mm)
     except Exception:
         await message.answer(
-            "Время должно быть в формате ЧЧ:ММ. Попробуй ещё раз.",
-            reply_markup=back_keyboard(),
+            "Выберите время кнопкой (17:00–23:00) или введите вручную в формате ЧЧ:ММ.",
+            reply_markup=add_history_time_keyboard_17_23(),
         )
         return
 
