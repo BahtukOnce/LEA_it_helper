@@ -1274,7 +1274,8 @@ async def adminhw_pick_student(callback_query: CallbackQuery, state: FSMContext)
     parts = callback_query.data.split("_")
     student_id = int(parts[2])
 
-    hws = get_homeworks_for_student(student_id, limit=50)
+    hws = get_homeworks_for_student(student_id, only_open=False)[:50]
+
     if not hws:
         await callback_query.message.edit_text("У ученика пока нет домашних заданий.")
         await callback_query.answer()
@@ -1367,7 +1368,8 @@ async def adminhw_delete(callback_query: CallbackQuery, state: FSMContext):
 
     # вернёмся к списку ученика
     student_id = hw["student_id"]
-    hws = get_homeworks_for_student(student_id, limit=50)
+    hws = get_homeworks_for_student(student_id, only_open=False)[:50]
+
     if not hws:
         await callback_query.message.edit_text("Домашек больше нет.")
         return
@@ -1418,7 +1420,7 @@ async def adminhw_edit_finish(message: Message, state: FSMContext):
 @router.callback_query(lambda c: c.data.startswith(ADMIN_HW_BACK_TO_LIST))
 async def adminhw_back_to_list(callback_query: CallbackQuery, state: FSMContext):
     student_id = int(callback_query.data.split("_")[-1])
-    hws = get_homeworks_for_student(student_id, limit=50)
+    hws = get_homeworks_for_student(student_id, only_open=False)[:50]
     if not hws:
         await callback_query.message.edit_text("У ученика пока нет домашних заданий.")
         await callback_query.answer()
@@ -3508,7 +3510,8 @@ def get_homeworks_for_student(student_id: int, only_open: bool = True):
             """
             SELECT * FROM homeworks
             WHERE student_id = ? AND is_done = 0
-            ORDER BY created_at
+            ORDER BY id DESC
+
             """,
             (student_id,),
         )
@@ -3517,7 +3520,8 @@ def get_homeworks_for_student(student_id: int, only_open: bool = True):
             """
             SELECT * FROM homeworks
             WHERE student_id = ?
-            ORDER BY created_at
+            ORDER BY id DESC
+
             """,
             (student_id,),
         )
