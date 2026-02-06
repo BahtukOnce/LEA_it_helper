@@ -3389,6 +3389,28 @@ def get_lesson_history_for_date(lesson_date: date):
     )
     return cur.fetchall()
 
+def get_done_lessons_without_topic():
+    """
+    Все занятия из истории (status='done'), у которых тема не указана,
+    без привязки к дате.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT lh.*, s.telegram_id, s.username, s.full_name
+        FROM lesson_history lh
+        JOIN students s ON s.id = lh.student_id
+        WHERE lh.status = 'done'
+          AND (
+              lh.topic IS NULL
+              OR TRIM(lh.topic) = ''
+              OR LOWER(TRIM(lh.topic)) = 'тема не указана'
+          )
+        ORDER BY lh.date DESC, lh.time DESC
+        """
+    )
+    return cur.fetchall()
+
 
 def set_lesson_paid(history_id: int, paid: int):
     cur = conn.cursor()
@@ -10221,16 +10243,17 @@ async def set_topic_enter(message: Message, state: FSMContext):
         reply_markup=main_menu_keyboard(is_teacher(message)),
     )
 
-    # Проверяем, есть ли еще занятия без тем
-    today = date.today()
-    rows = get_lesson_history_for_date(today)
-    lessons_without_topic = [r for r in rows if not r["topic"] or r["topic"].lower() == "тема не указана"]
+    # Проверяем, есть ли еще занятия без тем (по всей истории)
+    lessons_without_topic = get_done_lessons_without_topic()
 
     if lessons_without_topic:
-        # Отправляем обновленный список занятий без тем
         builder = InlineKeyboardBuilder()
         for r in lessons_without_topic:
-            button_text = f"#{r['id']} {r['time']} - {r['full_name'] or r['username']}"
+            d = date.fromisoformat(r["date"])
+            date_str = d.strftime("%d.%m.%Y")
+            student = r["full_name"] or r["username"] or str(r["telegram_id"] or "")
+            time_ = r["time"] or ""
+            button_text = f"#{r['id']} {date_str} {time_} - {student}"
             builder.button(text=button_text, callback_data=f"set_topic_{r['id']}")
 
         builder.button(text="✅ Все темы указаны", callback_data="topics_done")
@@ -10244,8 +10267,7 @@ async def set_topic_enter(message: Message, state: FSMContext):
         )
     else:
         await message.answer(
-            "🎉 <b>Все темы указаны!</b>\n"
-            "Спасибо за работу!",
+            "🎉 <b>Все темы указаны!</b>\nСпасибо за работу!",
             parse_mode="HTML",
         )
 
@@ -10254,20 +10276,9 @@ async def set_topic_enter(message: Message, state: FSMContext):
 
 @router.callback_query(lambda c: c.data == "topics_done")
 async def topics_done_callback(callback_query: CallbackQuery):
-    """Кнопка '✅ Все темы указаны' — отправляем уведомление админам сразу по нажатию"""
+    """Кнопка '✅ Все темы указаны' — проверяем ВСЮ историю и уведомляем админов"""
 
-    lesson_date = date.today()
-    rows = get_lesson_history_for_date(lesson_date)
-
-    if not rows:
-        await callback_query.answer("На сегодня нет занятий в истории.", show_alert=True)
-        return
-
-    # Проверяем, что реально не осталось занятий без темы
-    lessons_without_topic = [
-        r for r in rows
-        if (not r.get("topic")) or (str(r.get("topic")).strip().lower() == "тема не указана")
-    ]
+    lessons_without_topic = get_done_lessons_without_topic()
     if lessons_without_topic:
         await callback_query.answer(
             f"Ещё остались занятия без темы: {len(lessons_without_topic)}",
@@ -10275,31 +10286,19 @@ async def topics_done_callback(callback_query: CallbackQuery):
         )
         return
 
-    # Формируем текст уведомления
-    date_str = lesson_date.strftime("%d.%m.%Y")
     author_name = callback_query.from_user.full_name
     author_uname = f"@{callback_query.from_user.username}" if callback_query.from_user.username else ""
+    now_str = datetime.now().strftime("%d.%m.%Y %H:%M")
 
-    lines = [
+    notify_text = "\n".join([
         "✅ <b>Темы занятий отмечены</b>",
-        f"📅 Дата: <b>{date_str}</b>",
+        f"🕒 {now_str}",
         f"👤 Отметил(а): {author_name} {author_uname}".strip(),
         "",
-        "<b>Список занятий:</b>",
-    ]
+        "В истории занятий не осталось занятий без темы."
+    ])
 
-    # чтобы было по времени
-    for r in sorted(rows, key=lambda x: (x.get("time") or "")):
-        student = r.get("full_name") or r.get("username") or str(r.get("telegram_id") or "")
-        topic = (r.get("topic") or "").strip()
-        time_ = r.get("time") or ""
-        lines.append(f"• {time_} — {student}: <i>{topic}</i>")
-
-    notify_text = "\n".join(lines)
-
-    # Уведомляем админов (TEACHER_IDS)
     for admin_id in TEACHER_IDS:
-        # если не хочешь слать самому себе — пропускаем
         if admin_id == callback_query.from_user.id:
             continue
         try:
@@ -10307,54 +10306,48 @@ async def topics_done_callback(callback_query: CallbackQuery):
         except Exception as e:
             logging.error(f"Не удалось отправить уведомление о темах админу {admin_id}: {e}")
 
-    # Ответ пользователю и закрываем клавиатуру
     await callback_query.message.edit_text(
-        "✅ <b>Спасибо! Все темы указаны.</b>\n\n📨 Уведомление админам отправлено.",
-        parse_mode="HTML"
+        "✅ <b>Спасибо! Все темы указаны.</b>",
+        parse_mode="HTML",
+        reply_markup=None
     )
     await callback_query.answer()
 
 
 
+
 @router.message(Command("set_topics"))
 async def cmd_set_topics(message: Message):
-    """Ручной запуск процесса указания тем"""
+    """Ручной запуск процесса указания тем (по всей истории)"""
     if not is_teacher(message):
         await message.answer("Эта команда только для преподавателя.")
         return
 
-    today = date.today()
-    rows = get_lesson_history_for_date(today)
-
-    if not rows:
-        await message.answer("На сегодня нет занятий в истории.")
-        return
-
-    # ИЗМЕНЕНИЕ: фильтруем только состоявшиеся занятия без темы
-    lessons_without_topic = [
-        r for r in rows
-        if r["status"] == "done" and (not r["topic"] or r["topic"].lower() == "тема не указана")
-    ]
-
+    lessons_without_topic = get_done_lessons_without_topic()
     if not lessons_without_topic:
-        await message.answer("🎉 Все состоявшиеся занятия уже имеют указанные темы!")
+        await message.answer("🎉 Все темы уже указаны — занятий без темы нет.")
         return
 
-    # Создаем инлайн-клавиатуру с кнопками для каждого занятия без темы
     builder = InlineKeyboardBuilder()
     for r in lessons_without_topic:
-        button_text = f"#{r['id']} {r['time']} - {r['full_name'] or r['username']}"
+        d = date.fromisoformat(r["date"])
+        date_str = d.strftime("%d.%m.%Y")
+        student = r["full_name"] or r["username"] or str(r["telegram_id"] or "")
+        time_ = r["time"] or ""
+        button_text = f"#{r['id']} {date_str} {time_} - {student}"
         builder.button(text=button_text, callback_data=f"set_topic_{r['id']}")
 
     builder.button(text="✅ Все темы указаны", callback_data="topics_done")
     builder.adjust(1)
 
     await message.answer(
-        "📚 <b>Укажите темы для состоявшихся занятий без тем:</b>\n\n"
+        "📚 <b>Укажите темы для занятий без темы (вся история):</b>\n\n"
         "Нажмите на занятие, чтобы добавить тему:",
         parse_mode="HTML",
-        reply_markup=builder.as_markup()
+        reply_markup=builder.as_markup(),
     )
+
+
 
 async def reminder_loop():
     """
