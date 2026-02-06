@@ -2695,6 +2695,7 @@ def upsert_parent(telegram_id: int, username: str | None, full_name: str | None)
 @router.message(lambda message: message.text == "📚 Указать темы")
 async def handle_set_topics_button(message: Message):
     """Обработка нажатия кнопки "Указать темы" """
+    ensure_history_for_past_lessons(lookback_days=14, min_after_start_minutes=30)
     await cmd_set_topics(message)
 
 
@@ -8044,7 +8045,9 @@ async def admin_history_choose_student(message: Message, state: FSMContext):
 
 
 async def show_day_history(message: Message, lesson_date: date):
+    ensure_history_for_past_lessons(lookback_days=14, min_after_start_minutes=30)
     rows = get_lesson_history_for_date(lesson_date)
+
     if not rows:
         await message.answer(
             f"На {lesson_date.strftime('%d.%m.%Y')} занятий в истории нет."
@@ -10470,6 +10473,72 @@ async def show_global_schedule(message: Message):
 
     await message.answer("\n".join(lines), parse_mode="HTML")
 
+from datetime import datetime, timedelta, date, time as dtime
+
+def ensure_history_for_past_lessons(
+    lookback_days: int = 14,
+    min_after_start_minutes: int = 30,
+):
+    """
+    Автоматически создаёт записи в lesson_history для занятий, которые уже
+    начались минимум min_after_start_minutes назад (по расписанию).
+    """
+    now = datetime.now()
+    start_day = now.date() - timedelta(days=lookback_days - 1)
+
+    for i in range(lookback_days):
+        day = start_day + timedelta(days=i)
+
+        # Берём занятия по расписанию на этот день (у тебя такая функция уже есть)
+        lessons = get_lessons_for_date_with_extras(day)
+
+        for lesson in lessons:
+            # пропускаем отмены (если у тебя так отмечается)
+            if lesson.get("change_kind") == "cancel":
+                continue
+
+            time_str = (lesson.get("time") or "").strip()
+            if not time_str:
+                continue
+
+            try:
+                hh, mm = map(int, time_str.split(":"))
+                lesson_t = dtime(hh, mm)
+            except Exception:
+                continue
+
+            lesson_dt = datetime.combine(day, lesson_t)
+
+            # Ждём 30 минут после начала
+            if now < lesson_dt + timedelta(minutes=min_after_start_minutes):
+                continue
+
+            student_id = lesson.get("student_id")
+            if not student_id:
+                continue
+
+            # Не создаём дубль
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT 1 FROM lesson_history WHERE student_id=? AND date=? AND time=? LIMIT 1",
+                (student_id, day.isoformat(), lesson_t.strftime("%H:%M")),
+            )
+            if cur.fetchone():
+                continue
+
+            # Создаём запись: занятие состоялось, тема пока пустая
+            add_lesson_history(
+                student_id=student_id,
+                lesson_date=day,
+                lesson_time=lesson_t,
+                status="done",
+                paid=False,
+                note=None,
+                topic=None,
+                weekly_lesson_id=lesson.get("weekly_lesson_id"),
+            )
+
+
 
 @router.callback_query(lambda c: c.data.startswith("set_topic_"))
 async def set_topic_callback(callback_query: CallbackQuery, state: FSMContext):
@@ -10641,7 +10710,8 @@ async def cmd_set_topics(message: Message):
         await message.answer("Эта команда только для преподавателя.")
         return
 
-    lessons_without_topic = get_done_lessons_without_topic()
+    ensure_history_for_past_lessons(lookback_days=14, min_after_start_minutes=30)
+    lessons_without_topic = get_done_lessons_without_topic(min_after_start_minutes=30)
     if not lessons_without_topic:
         await message.answer("🎉 Все темы уже указаны — занятий без темы нет.")
         return
