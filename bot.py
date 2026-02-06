@@ -3692,27 +3692,43 @@ def get_lesson_history_for_date(lesson_date: date):
     )
     return cur.fetchall()
 
-def get_done_lessons_without_topic():
+def get_done_lessons_without_topic(min_after_start_minutes: int = 30):
     """
-    Все занятия из истории (status='done'), у которых тема не указана,
-    без привязки к дате.
+    Возвращает занятия из истории (status='done') без темы,
+    но только те, у которых прошло минимум min_after_start_minutes
+    от времени начала (date + time).
     """
     cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT lh.*, s.telegram_id, s.username, s.full_name
+    cur.execute("""
+        SELECT lh.*, s.full_name
         FROM lesson_history lh
         JOIN students s ON s.id = lh.student_id
         WHERE lh.status = 'done'
           AND (
-              lh.topic IS NULL
-              OR TRIM(lh.topic) = ''
-              OR LOWER(TRIM(lh.topic)) = 'тема не указана'
-          )
+                lh.topic IS NULL
+                OR TRIM(lh.topic) = ''
+                OR TRIM(LOWER(lh.topic)) = 'тема не указана'
+              )
         ORDER BY lh.date DESC, lh.time DESC
-        """
-    )
-    return cur.fetchall()
+    """)
+    rows = cur.fetchall()
+
+    cutoff = datetime.now() - timedelta(minutes=min_after_start_minutes)
+
+    filtered = []
+    for r in rows:
+        try:
+            # date: YYYY-MM-DD, time: HH:MM
+            dt = datetime.strptime(f"{r['date']} {r['time']}", "%Y-%m-%d %H:%M")
+        except Exception:
+            # если в данных вдруг мусор — просто пропускаем
+            continue
+
+        if dt <= cutoff:
+            filtered.append(r)
+
+    return filtered
+
 
 
 def set_lesson_paid(history_id: int, paid: int):
@@ -10546,7 +10562,7 @@ async def set_topic_enter(message: Message, state: FSMContext):
     )
 
     # Проверяем, есть ли еще занятия без тем (по всей истории)
-    lessons_without_topic = get_done_lessons_without_topic()
+    lessons_without_topic = get_done_lessons_without_topic(min_after_start_minutes=30)
 
     if lessons_without_topic:
         builder = InlineKeyboardBuilder()
