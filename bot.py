@@ -146,6 +146,14 @@ RESCHEDULE_OVERRIDE_PREFIX = "reschedule_override_"
 EDIT_HISTORY_PREFIX = "edit_history_"
 DELETE_HISTORY_PREFIX = "delete_history_"
 EDIT_HISTORY_FIELD_PREFIX = "edit_field_"
+ADMIN_HW_STUDENT_PREFIX = "adminhw_student_"
+ADMIN_HW_PAGE_PREFIX = "adminhw_page_"
+ADMIN_HW_PICK_PREFIX = "adminhw_pick_"          # pick homework_id
+ADMIN_HW_TOGGLE_PREFIX = "adminhw_toggle_"      # toggle homework_id
+ADMIN_HW_DELETE_PREFIX = "adminhw_delete_"      # delete homework_id
+ADMIN_HW_EDIT_PREFIX = "adminhw_edit_"          # edit homework_id
+ADMIN_HW_BACK_TO_LIST = "adminhw_back_list_"    # back to list for student_id
+
 
 
 DAY_NAMES = [
@@ -160,7 +168,10 @@ DAY_NAMES = [
 
 # Константы для callback_data
 
-
+class AdminHomeworkStates(StatesGroup):
+    choosing_student = State()
+    choosing_homework = State()
+    editing_text = State()
 
 class SetTopicStates(StatesGroup):
     waiting_topic = State()
@@ -557,6 +568,7 @@ def main_menu_keyboard(is_teacher_flag: bool) -> ReplyKeyboardMarkup:
 
             ],
             [
+                KeyboardButton(text="📚 Домашки учеников"),
                 KeyboardButton(text="🧾 История ученика"),
                 KeyboardButton(text="📝 Добавить занятие в историю"),
             ],
@@ -1121,6 +1133,7 @@ def create_action_keyboard(students, action_type: str, page: int = 0):
         "add_history": "📝",
         "parentlink": "👨‍👩‍👧",
         "pchild": "👤",
+        "adminhw": "📚",
 
     }
 
@@ -1168,6 +1181,257 @@ def create_action_keyboard(students, action_type: str, page: int = 0):
     ))
 
     return builder.as_markup(), total_pages
+
+def get_homeworks_for_student(student_id: int, limit: int = 50):
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, text, created_at, is_done
+        FROM homeworks
+        WHERE student_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+    """, (student_id, limit))
+    return cur.fetchall()
+
+def get_homework_by_id(hw_id: int):
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT h.*, s.full_name, s.username, s.telegram_id
+        FROM homeworks h
+        JOIN students s ON s.id = h.student_id
+        WHERE h.id = ?
+    """, (hw_id,))
+    return cur.fetchone()
+
+def delete_homework(hw_id: int):
+    cur = conn.cursor()
+    cur.execute("DELETE FROM homeworks WHERE id = ?", (hw_id,))
+    conn.commit()
+
+def update_homework_text(hw_id: int, new_text: str):
+    cur = conn.cursor()
+    cur.execute("UPDATE homeworks SET text = ? WHERE id = ?", (new_text, hw_id))
+    conn.commit()
+
+def toggle_homework_done(hw_id: int):
+    cur = conn.cursor()
+    cur.execute("SELECT is_done FROM homeworks WHERE id = ?", (hw_id,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    new_val = 0 if int(row["is_done"] or 0) == 1 else 1
+    cur.execute("UPDATE homeworks SET is_done = ? WHERE id = ?", (new_val, hw_id))
+    conn.commit()
+    return new_val
+
+
+@router.message(lambda m: m.text == "📚 Домашки учеников")
+async def admin_homeworks_menu(message: Message, state: FSMContext):
+    if not is_teacher(message):
+        return
+
+    students = get_all_students()
+    if not students:
+        await message.answer("Пока нет ни одного ученика.")
+        return
+
+    await state.update_data(adminhw_students=students)
+    kb, _ = create_action_keyboard(students, "adminhw", page=0)
+    await state.set_state(AdminHomeworkStates.choosing_student)
+
+    await message.answer(
+        "📚 <b>Домашки учеников</b>\n\nВыберите ученика:",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
+
+@router.callback_query(lambda c: c.data.startswith("adminhw_page_"), AdminHomeworkStates.choosing_student)
+async def adminhw_page_callback(callback_query: CallbackQuery, state: FSMContext):
+    page = int(callback_query.data.split("_")[2])
+    data = await state.get_data()
+    students = data.get("adminhw_students", [])
+    kb, _ = create_action_keyboard(students, "adminhw", page=page)
+    await callback_query.message.edit_reply_markup(reply_markup=kb)
+    await callback_query.answer()
+
+
+def build_admin_homeworks_list_kb(student_id: int, homeworks):
+    kb = InlineKeyboardBuilder()
+    for hw in homeworks[:30]:
+        done = "✅" if int(hw["is_done"] or 0) == 1 else "⬜️"
+        created = (hw["created_at"] or "")[:16]
+        kb.button(
+            text=f"{done} {created} (id:{hw['id']})",
+            callback_data=f"{ADMIN_HW_PICK_PREFIX}{hw['id']}"
+        )
+    kb.button(text="⬅️ Назад к ученикам", callback_data="back_from_adminhw")
+    kb.adjust(1)
+    return kb.as_markup()
+
+@router.callback_query(lambda c: c.data.startswith("adminhw_student_"), AdminHomeworkStates.choosing_student)
+async def adminhw_pick_student(callback_query: CallbackQuery, state: FSMContext):
+    parts = callback_query.data.split("_")
+    student_id = int(parts[2])
+
+    hws = get_homeworks_for_student(student_id, limit=50)
+    if not hws:
+        await callback_query.message.edit_text("У ученика пока нет домашних заданий.")
+        await callback_query.answer()
+        return
+
+    await state.update_data(adminhw_student_id=student_id)
+    await state.set_state(AdminHomeworkStates.choosing_homework)
+
+    await callback_query.message.edit_text(
+        "📚 Выберите домашку:",
+        reply_markup=build_admin_homeworks_list_kb(student_id, hws)
+    )
+    await callback_query.answer()
+
+
+def build_admin_homework_actions_kb(hw_id: int, student_id: int, is_done: int):
+    kb = InlineKeyboardBuilder()
+    kb.button(text=("✅ Выполнена" if is_done else "⬜️ Отметить выполненной"),
+              callback_data=f"{ADMIN_HW_TOGGLE_PREFIX}{hw_id}")
+    kb.button(text="✏️ Изменить", callback_data=f"{ADMIN_HW_EDIT_PREFIX}{hw_id}")
+    kb.button(text="🗑️ Удалить", callback_data=f"{ADMIN_HW_DELETE_PREFIX}{hw_id}")
+    kb.button(text="⬅️ Назад к списку", callback_data=f"{ADMIN_HW_BACK_TO_LIST}{student_id}")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+@router.callback_query(lambda c: c.data.startswith(ADMIN_HW_PICK_PREFIX), AdminHomeworkStates.choosing_homework)
+async def adminhw_open_homework(callback_query: CallbackQuery, state: FSMContext):
+    hw_id = int(callback_query.data.split("_")[-1])  # если префикс без "_" — подгони split
+    hw = get_homework_by_id(hw_id)
+    if not hw:
+        await callback_query.answer("Домашка не найдена", show_alert=True)
+        return
+
+    await state.update_data(adminhw_hw_id=hw_id)
+
+    student_name = hw["full_name"] or hw["username"] or str(hw["telegram_id"])
+    done = int(hw["is_done"] or 0)
+
+    text = (
+        f"📚 <b>Домашка ученика {student_name}</b>\n"
+        f"🆔 {hw['id']}\n"
+        f"🗓 {hw['created_at']}\n"
+        f"Статус: {'✅ выполнена' if done else '⬜️ не выполнена'}\n\n"
+        f"{hw['text']}"
+    )
+
+    await callback_query.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=build_admin_homework_actions_kb(hw_id, hw["student_id"], done)
+    )
+    await callback_query.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith(ADMIN_HW_TOGGLE_PREFIX))
+async def adminhw_toggle_done(callback_query: CallbackQuery, state: FSMContext):
+    hw_id = int(callback_query.data.split("_")[-1])
+    new_val = toggle_homework_done(hw_id)
+    hw = get_homework_by_id(hw_id)
+    if not hw:
+        await callback_query.answer("Домашка не найдена", show_alert=True)
+        return
+
+    student_name = hw["full_name"] or hw["username"] or str(hw["telegram_id"])
+    text = (
+        f"📚 <b>Домашка ученика {student_name}</b>\n"
+        f"🆔 {hw['id']}\n"
+        f"🗓 {hw['created_at']}\n"
+        f"Статус: {'✅ выполнена' if int(hw['is_done'] or 0) else '⬜️ не выполнена'}\n\n"
+        f"{hw['text']}"
+    )
+    await callback_query.message.edit_text(
+        text, parse_mode="HTML",
+        reply_markup=build_admin_homework_actions_kb(hw_id, hw["student_id"], int(hw["is_done"] or 0))
+    )
+    await callback_query.answer("Готово")
+
+
+@router.callback_query(lambda c: c.data.startswith(ADMIN_HW_DELETE_PREFIX))
+async def adminhw_delete(callback_query: CallbackQuery, state: FSMContext):
+    hw_id = int(callback_query.data.split("_")[-1])
+    hw = get_homework_by_id(hw_id)
+    if not hw:
+        await callback_query.answer("Домашка не найдена", show_alert=True)
+        return
+
+    delete_homework(hw_id)
+    await callback_query.answer("Удалено")
+
+    # вернёмся к списку ученика
+    student_id = hw["student_id"]
+    hws = get_homeworks_for_student(student_id, limit=50)
+    if not hws:
+        await callback_query.message.edit_text("Домашек больше нет.")
+        return
+
+    await callback_query.message.edit_text(
+        "📚 Выберите домашку:",
+        reply_markup=build_admin_homeworks_list_kb(student_id, hws)
+    )
+
+
+@router.callback_query(lambda c: c.data.startswith(ADMIN_HW_EDIT_PREFIX))
+async def adminhw_edit_start(callback_query: CallbackQuery, state: FSMContext):
+    hw_id = int(callback_query.data.split("_")[-1])
+    hw = get_homework_by_id(hw_id)
+    if not hw:
+        await callback_query.answer("Домашка не найдена", show_alert=True)
+        return
+
+    await state.update_data(adminhw_hw_id=hw_id)
+    await state.set_state(AdminHomeworkStates.editing_text)
+
+    await callback_query.message.answer(
+        "✏️ Отправьте новый текст домашки одним сообщением:",
+        reply_markup=back_keyboard()
+    )
+    await callback_query.answer()
+
+@router.message(AdminHomeworkStates.editing_text)
+async def adminhw_edit_finish(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+    if text == BACK_TEXT:
+        await state.clear()
+        await message.answer("Ок, отменено.", reply_markup=main_menu_keyboard(True))
+        return
+
+    data = await state.get_data()
+    hw_id = data.get("adminhw_hw_id")
+    if not hw_id:
+        await state.clear()
+        await message.answer("Сессия сбилась. Откройте домашку ещё раз.", reply_markup=main_menu_keyboard(True))
+        return
+
+    update_homework_text(hw_id, text)
+    await state.clear()
+    await message.answer("✅ Домашка обновлена.", reply_markup=main_menu_keyboard(True))
+
+
+@router.callback_query(lambda c: c.data.startswith(ADMIN_HW_BACK_TO_LIST))
+async def adminhw_back_to_list(callback_query: CallbackQuery, state: FSMContext):
+    student_id = int(callback_query.data.split("_")[-1])
+    hws = get_homeworks_for_student(student_id, limit=50)
+    if not hws:
+        await callback_query.message.edit_text("У ученика пока нет домашних заданий.")
+        await callback_query.answer()
+        return
+
+    await state.set_state(AdminHomeworkStates.choosing_homework)
+    await callback_query.message.edit_text(
+        "📚 Выберите домашку:",
+        reply_markup=build_admin_homeworks_list_kb(student_id, hws)
+    )
+    await callback_query.answer()
+
+
 
 @router.message(lambda m: m.text == "📅 Расписание ученика")
 async def parent_schedule_menu(message: Message, state: FSMContext):
