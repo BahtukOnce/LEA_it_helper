@@ -154,6 +154,11 @@ ADMIN_HW_DELETE_PREFIX = "adminhw_delete_"      # delete homework_id
 ADMIN_HW_EDIT_PREFIX = "adminhw_edit_"          # edit homework_id
 ADMIN_HW_BACK_TO_LIST = "adminhw_back_list_"    # back to list for student_id
 TOPIC_DELETE_PREFIX = "topic_delete_"
+SET_TOPIC_WRITE_PREFIX = "set_topic_write_"
+SET_TOPIC_DEL_PREFIX = "set_topic_del_"
+SET_TOPIC_DEL_OK_PREFIX = "set_topic_del_ok_"
+SET_TOPIC_DEL_NO_PREFIX = "set_topic_del_no_"
+SET_TOPICS_BACK = "set_topics_back"
 
 
 
@@ -11083,47 +11088,138 @@ def get_students_needing_attention():
     }
     return attention_students
 
-@router.callback_query(lambda c: c.data.startswith(SET_TOPIC_PREFIX))
+@router.callback_query(lambda c: c.data.startswith("set_topic_") and c.data.count("_") == 2)
 async def set_topic_callback(callback_query: CallbackQuery, state: FSMContext):
+    """Выбор занятия из списка 'указать темы' -> показываем действия: указать тему / удалить"""
+    history_id = int(callback_query.data.split("_")[2])
+
     if not is_teacher(callback_query):
-        await callback_query.answer("Только для преподавателя", show_alert=True)
+        await callback_query.answer("Эта функция только для преподавателя.")
         return
 
-    history_id = int(callback_query.data[len(SET_TOPIC_PREFIX):])
-    lesson = get_lesson_history_by_id(history_id)
-    if not lesson:
-        await callback_query.answer("Занятие не найдено", show_alert=True)
+    record = get_lesson_history_by_id(history_id)
+    if not record:
+        await callback_query.answer("Запись не найдена")
         return
 
-    lesson_date = date.fromisoformat(lesson["date"]).strftime("%d.%m.%Y")
-    lesson_time = lesson["time"]
+    d = date.fromisoformat(record["date"])
+    date_str = d.strftime("%d.%m.%Y")
 
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✏️ Указать тему", callback_data=f"{SET_TOPIC_WRITE_PREFIX}{history_id}")
+    builder.button(text="🗑️ Занятие не состоялось (удалить)", callback_data=f"{SET_TOPIC_DEL_PREFIX}{history_id}")
+    builder.button(text="⬅️ Назад к списку", callback_data=SET_TOPICS_BACK)
+    builder.adjust(1)
+
+    await callback_query.message.answer(
+        f"📚 <b>Выберите действие для занятия:</b>\n\n"
+        f"Ученик: {record['full_name'] or record['username']}\n"
+        f"Дата: {date_str}\n"
+        f"Время: {record['time']}",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+    await callback_query.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith(SET_TOPIC_WRITE_PREFIX))
+async def set_topic_write_callback(callback_query: CallbackQuery, state: FSMContext):
+    history_id = int(callback_query.data.split("_")[3])
+
+    if not is_teacher(callback_query):
+        await callback_query.answer("Эта функция только для преподавателя.")
+        return
+
+    # Сохраняем ID записи в состоянии
     await state.update_data(set_topic_history_id=history_id)
     await state.set_state(SetTopicStates.waiting_topic)
 
+    record = get_lesson_history_by_id(history_id)
+    if not record:
+        await callback_query.answer("Запись не найдена")
+        return
+
+    d = date.fromisoformat(record["date"])
+    date_str = d.strftime("%d.%m.%Y")
+
     await callback_query.message.answer(
-        f"Вы выбрали занятие:\n"
-        f"👤 Ученик: {lesson['full_name']}\n"
-        f"📅 Дата: {lesson_date}\n"
-        f"⏰ Время: {lesson_time}\n\n"
+        f"📚 <b>Укажите тему занятия:</b>\n\n"
+        f"Ученик: {record['full_name'] or record['username']}\n"
+        f"Дата: {date_str}\n"
+        f"Время: {record['time']}\n\n"
         f"Введите тему занятия:",
+        parse_mode="HTML",
         reply_markup=back_keyboard()
     )
+    await callback_query.answer()
 
-    # 🔴 КНОПКА УДАЛЕНИЯ
-    kb = InlineKeyboardBuilder()
-    kb.button(
-        text="🗑️ Удалить занятие (не состоялось)",
-        callback_data=f"{TOPIC_DELETE_PREFIX}{history_id}"
-    )
-    kb.adjust(1)
+
+@router.callback_query(lambda c: c.data.startswith(SET_TOPIC_DEL_PREFIX))
+async def set_topic_delete_ask(callback_query: CallbackQuery):
+    history_id = int(callback_query.data.split("_")[3])
+
+    if not is_teacher(callback_query):
+        await callback_query.answer("Эта функция только для преподавателя.")
+        return
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, удалить", callback_data=f"{SET_TOPIC_DEL_OK_PREFIX}{history_id}")
+    builder.button(text="❌ Нет", callback_data=f"{SET_TOPIC_DEL_NO_PREFIX}{history_id}")
+    builder.adjust(1)
 
     await callback_query.message.answer(
-        "Если занятие не состоялось:",
-        reply_markup=kb.as_markup()
+        "🗑️ <b>Удалить занятие из истории?</b>\n"
+        "Это действие нельзя отменить.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+    await callback_query.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith(SET_TOPIC_DEL_OK_PREFIX))
+async def set_topic_delete_confirm(callback_query: CallbackQuery):
+    history_id = int(callback_query.data.split("_")[4])
+
+    if not is_teacher(callback_query):
+        await callback_query.answer("Эта функция только для преподавателя.")
+        return
+
+    deleted = delete_lesson_history(history_id)
+    if not deleted:
+        await callback_query.answer("Запись не найдена", show_alert=True)
+        return
+
+    await callback_query.message.answer("✅ Занятие удалено из истории.")
+    await callback_query.answer()
+
+    # Показать обновлённый список занятий без темы
+    lessons_without_topic = get_done_lessons_without_topic(min_after_start_minutes=30)
+    if not lessons_without_topic:
+        await callback_query.message.answer("🎉 Все темы уже указаны — занятий без темы нет.")
+        return
+
+    builder = InlineKeyboardBuilder()
+    for r in lessons_without_topic:
+        d = date.fromisoformat(r["date"])
+        date_str = d.strftime("%d.%m.%Y")
+        student = r["full_name"] or r["username"] or str(r["telegram_id"] or "")
+        time_ = r["time"] or ""
+        button_text = f"#{r['id']} {date_str} {time_} - {student}"
+        builder.button(text=button_text, callback_data=f"set_topic_{r['id']}")
+
+    builder.button(text="✅ Все темы указаны", callback_data="topics_done")
+    builder.adjust(1)
+
+    await callback_query.message.answer(
+        "📚 <b>Остались занятия без тем:</b>\n\n"
+        "Нажмите на занятие, чтобы добавить тему или удалить (если не состоялось):",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
     )
 
-    await callback_query.answer()
+@router.callback_query(lambda c: c.data.startswith(SET_TOPIC_DEL_NO_PREFIX))
+async def set_topic_delete_cancel(callback_query: CallbackQuery):
+    await callback_query.answer("Ок, не удаляем.")
 
 
 
