@@ -153,6 +153,8 @@ ADMIN_HW_TOGGLE_PREFIX = "adminhw_toggle_"      # toggle homework_id
 ADMIN_HW_DELETE_PREFIX = "adminhw_delete_"      # delete homework_id
 ADMIN_HW_EDIT_PREFIX = "adminhw_edit_"          # edit homework_id
 ADMIN_HW_BACK_TO_LIST = "adminhw_back_list_"    # back to list for student_id
+TOPIC_DELETE_PREFIX = "topic_delete_"
+
 
 
 
@@ -10540,40 +10542,6 @@ def ensure_history_for_past_lessons(
 
 
 
-@router.callback_query(lambda c: c.data.startswith("set_topic_"))
-async def set_topic_callback(callback_query: CallbackQuery, state: FSMContext):
-    """Обработка нажатия на кнопку установки темы"""
-    history_id = int(callback_query.data.split("_")[2])
-
-    if not is_teacher(callback_query):
-        await callback_query.answer("Эта функция только для преподавателя.")
-        return
-
-    # Сохраняем ID записи в состоянии
-    await state.update_data(set_topic_history_id=history_id)
-    await state.set_state(SetTopicStates.waiting_topic)
-
-    # Получаем информацию о занятии
-    record = get_lesson_history_by_id(history_id)
-    if not record:
-        await callback_query.answer("Запись не найдена")
-        return
-
-    d = date.fromisoformat(record["date"])
-    date_str = d.strftime("%d.%m.%Y")
-
-    await callback_query.message.answer(
-        f"📚 <b>Укажите тему занятия:</b>\n\n"
-        f"Ученик: {record['full_name'] or record['username']}\n"
-        f"Дата: {date_str}\n"
-        f"Время: {record['time']}\n\n"
-        f"Введите тему занятия:",
-        parse_mode="HTML",
-        reply_markup=back_keyboard()
-    )
-    await callback_query.answer()
-
-
 @router.message(SetTopicStates.waiting_topic)
 async def set_topic_enter(message: Message, state: FSMContext):
     """Обработка ввода темы занятия"""
@@ -11115,43 +11083,48 @@ def get_students_needing_attention():
     }
     return attention_students
 
-@router.callback_query(lambda c: c.data.startswith("set_topic_"))
+@router.callback_query(lambda c: c.data.startswith(SET_TOPIC_PREFIX))
 async def set_topic_callback(callback_query: CallbackQuery, state: FSMContext):
-    """Обработка нажатия на кнопку установки темы"""
-    history_id = int(callback_query.data.split("_")[2])
-
     if not is_teacher(callback_query):
-        await callback_query.answer("Эта функция только для преподавателя.")
+        await callback_query.answer("Только для преподавателя", show_alert=True)
         return
 
-    # Получаем информацию о занятии
-    record = get_lesson_history_by_id(history_id)
-    if not record:
-        await callback_query.answer("Запись не найдена")
+    history_id = int(callback_query.data[len(SET_TOPIC_PREFIX):])
+    lesson = get_lesson_history_by_id(history_id)
+    if not lesson:
+        await callback_query.answer("Занятие не найдено", show_alert=True)
         return
 
-    # ИЗМЕНЕНИЕ: проверяем статус занятия
-    if record["status"] != "done":
-        await callback_query.answer("❌ Нельзя указать тему для отмененного занятия")
-        return
+    lesson_date = date.fromisoformat(lesson["date"]).strftime("%d.%m.%Y")
+    lesson_time = lesson["time"]
 
-    # Сохраняем ID записи в состоянии
     await state.update_data(set_topic_history_id=history_id)
     await state.set_state(SetTopicStates.waiting_topic)
 
-    d = date.fromisoformat(record["date"])
-    date_str = d.strftime("%d.%m.%Y")
-
     await callback_query.message.answer(
-        f"📚 <b>Укажите тему занятия:</b>\n\n"
-        f"Ученик: {record['full_name'] or record['username']}\n"
-        f"Дата: {date_str}\n"
-        f"Время: {record['time']}\n\n"
+        f"Вы выбрали занятие:\n"
+        f"👤 Ученик: {lesson['full_name']}\n"
+        f"📅 Дата: {lesson_date}\n"
+        f"⏰ Время: {lesson_time}\n\n"
         f"Введите тему занятия:",
-        parse_mode="HTML",
         reply_markup=back_keyboard()
     )
+
+    # 🔴 КНОПКА УДАЛЕНИЯ
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="🗑️ Удалить занятие (не состоялось)",
+        callback_data=f"{TOPIC_DELETE_PREFIX}{history_id}"
+    )
+    kb.adjust(1)
+
+    await callback_query.message.answer(
+        "Если занятие не состоялось:",
+        reply_markup=kb.as_markup()
+    )
+
     await callback_query.answer()
+
 
 
 # ---------- ДОПОЛНИТЕЛЬНЫЕ ЗАНЯТИЯ (БЕЗ ПЕРЕНОСОВ) ----------
