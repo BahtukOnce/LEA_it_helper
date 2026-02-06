@@ -10254,12 +10254,66 @@ async def set_topic_enter(message: Message, state: FSMContext):
 
 @router.callback_query(lambda c: c.data == "topics_done")
 async def topics_done_callback(callback_query: CallbackQuery):
-    """Обработка нажатия кнопки "Все темы указаны" """
+    """Кнопка '✅ Все темы указаны' — отправляем уведомление админам сразу по нажатию"""
+
+    lesson_date = date.today()
+    rows = get_lesson_history_for_date(lesson_date)
+
+    if not rows:
+        await callback_query.answer("На сегодня нет занятий в истории.", show_alert=True)
+        return
+
+    # Проверяем, что реально не осталось занятий без темы
+    lessons_without_topic = [
+        r for r in rows
+        if (not r.get("topic")) or (str(r.get("topic")).strip().lower() == "тема не указана")
+    ]
+    if lessons_without_topic:
+        await callback_query.answer(
+            f"Ещё остались занятия без темы: {len(lessons_without_topic)}",
+            show_alert=True
+        )
+        return
+
+    # Формируем текст уведомления
+    date_str = lesson_date.strftime("%d.%m.%Y")
+    author_name = callback_query.from_user.full_name
+    author_uname = f"@{callback_query.from_user.username}" if callback_query.from_user.username else ""
+
+    lines = [
+        "✅ <b>Темы занятий отмечены</b>",
+        f"📅 Дата: <b>{date_str}</b>",
+        f"👤 Отметил(а): {author_name} {author_uname}".strip(),
+        "",
+        "<b>Список занятий:</b>",
+    ]
+
+    # чтобы было по времени
+    for r in sorted(rows, key=lambda x: (x.get("time") or "")):
+        student = r.get("full_name") or r.get("username") or str(r.get("telegram_id") or "")
+        topic = (r.get("topic") or "").strip()
+        time_ = r.get("time") or ""
+        lines.append(f"• {time_} — {student}: <i>{topic}</i>")
+
+    notify_text = "\n".join(lines)
+
+    # Уведомляем админов (TEACHER_IDS)
+    for admin_id in TEACHER_IDS:
+        # если не хочешь слать самому себе — пропускаем
+        if admin_id == callback_query.from_user.id:
+            continue
+        try:
+            await bot.send_message(admin_id, notify_text, parse_mode="HTML")
+        except Exception as e:
+            logging.error(f"Не удалось отправить уведомление о темах админу {admin_id}: {e}")
+
+    # Ответ пользователю и закрываем клавиатуру
     await callback_query.message.edit_text(
-        "✅ <b>Спасибо! Все темы указаны.</b>",
+        "✅ <b>Спасибо! Все темы указаны.</b>\n\n📨 Уведомление админам отправлено.",
         parse_mode="HTML"
     )
     await callback_query.answer()
+
 
 
 @router.message(Command("set_topics"))
