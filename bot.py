@@ -11090,8 +11090,12 @@ def get_students_needing_attention():
 
 @router.callback_query(lambda c: c.data.startswith("set_topic_") and c.data.count("_") == 2)
 async def set_topic_callback(callback_query: CallbackQuery, state: FSMContext):
-    """Выбор занятия из списка 'указать темы' -> показываем действия: указать тему / удалить"""
-    history_id = int(callback_query.data.split("_")[2])
+    try:
+        history_id = int(callback_query.data[len("set_topic_"):])
+    except Exception:
+        await callback_query.answer("Некорректные данные кнопки.", show_alert=True)
+        return
+
 
     if not is_teacher(callback_query):
         await callback_query.answer("Эта функция только для преподавателя.")
@@ -11124,7 +11128,12 @@ async def set_topic_callback(callback_query: CallbackQuery, state: FSMContext):
 
 @router.callback_query(lambda c: c.data.startswith(SET_TOPIC_WRITE_PREFIX))
 async def set_topic_write_callback(callback_query: CallbackQuery, state: FSMContext):
-    history_id = int(callback_query.data.split("_")[3])
+    try:
+        history_id = int(callback_query.data[len(SET_TOPIC_WRITE_PREFIX):])
+    except Exception:
+        await callback_query.answer("Некорректные данные кнопки.", show_alert=True)
+        return
+
 
     if not is_teacher(callback_query):
         await callback_query.answer("Эта функция только для преподавателя.")
@@ -11156,7 +11165,12 @@ async def set_topic_write_callback(callback_query: CallbackQuery, state: FSMCont
 
 @router.callback_query(lambda c: c.data.startswith(SET_TOPIC_DEL_PREFIX))
 async def set_topic_delete_ask(callback_query: CallbackQuery):
-    history_id = int(callback_query.data.split("_")[3])
+    try:
+        history_id = int(callback_query.data[len(SET_TOPIC_DEL_PREFIX):])
+    except Exception:
+        await callback_query.answer("Некорректные данные кнопки.", show_alert=True)
+        return
+
 
     if not is_teacher(callback_query):
         await callback_query.answer("Эта функция только для преподавателя.")
@@ -11178,7 +11192,12 @@ async def set_topic_delete_ask(callback_query: CallbackQuery):
 
 @router.callback_query(lambda c: c.data.startswith(SET_TOPIC_DEL_OK_PREFIX))
 async def set_topic_delete_confirm(callback_query: CallbackQuery):
-    history_id = int(callback_query.data.split("_")[4])
+    try:
+        history_id = int(callback_query.data[len(SET_TOPIC_DEL_OK_PREFIX):])
+    except Exception:
+        await callback_query.answer("Некорректные данные кнопки.", show_alert=True)
+        return
+
 
     if not is_teacher(callback_query):
         await callback_query.answer("Эта функция только для преподавателя.")
