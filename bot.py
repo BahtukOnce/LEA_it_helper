@@ -11162,9 +11162,20 @@ async def set_topic_write_callback(callback_query: CallbackQuery, state: FSMCont
     )
     await callback_query.answer()
 
+@router.callback_query(lambda c: c.data.startswith(SET_TOPIC_DEL_NO_PREFIX))
+async def set_topic_delete_cancel(callback_query: CallbackQuery):
+    # history_id можно не парсить вообще, но если хочешь — можно так же как в confirm
+    await callback_query.message.answer("Ок, не удаляю.")
+    await callback_query.answer()
 
-@router.callback_query(lambda c: c.data.startswith(SET_TOPIC_DEL_PREFIX))
+
+@router.callback_query(
+    lambda c: c.data.startswith(SET_TOPIC_DEL_PREFIX)
+    and not c.data.startswith(SET_TOPIC_DEL_OK_PREFIX)
+    and not c.data.startswith(SET_TOPIC_DEL_NO_PREFIX)
+)
 async def set_topic_delete_ask(callback_query: CallbackQuery):
+
     try:
         history_id = int(callback_query.data[len(SET_TOPIC_DEL_PREFIX):])
     except Exception:
