@@ -5,6 +5,8 @@ from datetime import datetime, date, time as dtime, timedelta
 from typing import Optional
 from dotenv import load_dotenv
 import os
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from datetime import timedelta, date as dt_date
 
 
 from aiogram import Bot, Dispatcher, Router
@@ -11278,6 +11280,7 @@ def create_extra_lessons_table():
     conn.commit()
 
 
+
 # Вызываем создание таблицы при инициализации
 create_extra_lessons_table()
 
@@ -11289,6 +11292,50 @@ class AddExtraLessonStates(StatesGroup):
     waiting_topic = State()
     waiting_reminder = State()
     confirming = State()
+
+
+
+def addextra_dates_kb(days_back: int = 14) -> InlineKeyboardMarkup:
+    """
+    Даты за последние N дней, начиная с сегодня.
+    callback: addextra_date_YYYY-MM-DD
+    """
+    today = dt_date.today()
+    buttons = []
+    for i in range(days_back):
+        d = today - timedelta(days=i)
+        buttons.append(
+            InlineKeyboardButton(
+                text=d.strftime("%d.%m"),
+                callback_data=f"addextra_date_{d.isoformat()}",
+            )
+        )
+
+    # 2 колонки (можешь поменять)
+    rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="addextra_cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def addextra_times_kb(start_h: int = 17, end_h: int = 23) -> InlineKeyboardMarkup:
+    """
+    Время кнопками 17:00 ... 23:00
+    callback: addextra_time_HH:MM
+    """
+    buttons = []
+    for h in range(start_h, end_h + 1):
+        t = f"{h:02d}:00"
+        buttons.append(
+            InlineKeyboardButton(text=t, callback_data=f"addextra_time_{t}")
+        )
+
+    # 4 колонки (можешь поменять)
+    rows = [buttons[i:i+4] for i in range(0, len(buttons), 4)]
+    rows.append([
+        InlineKeyboardButton(text="⌨️ Ввести другое время", callback_data="addextra_time_other"),
+        InlineKeyboardButton(text="⬅️ Назад", callback_data="addextra_back_to_dates"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def add_extra_lesson(
@@ -11459,9 +11506,8 @@ async def notify_extra_lesson_added(student_telegram_id: int, lesson_date: date,
 
 @router.message(Command("add_extra"))
 async def cmd_add_extra(message: Message, state: FSMContext):
-    """Добавление дополнительного занятия"""
     if not is_teacher(message):
-        await message.answer("Эта команда доступна только преподавателю.")
+        await message.answer("Эта команда только для преподавателя.")
         return
 
     students = get_all_students()
@@ -11469,18 +11515,96 @@ async def cmd_add_extra(message: Message, state: FSMContext):
         await message.answer("Пока нет ни одного ученика. Пусть они напишут боту /start.")
         return
 
-    ids = []
-    lines = ["Для какого ученика добавляем дополнительное занятие? Выбери номер:"]
+    # ⬇️ ВАЖНО: сохраним список студентов в state (для пагинации/перерисовки)
+    await state.update_data(addextra_students=students)
 
-    for i, s in enumerate(students, start=1):
-        ids.append(s["id"])
-        name = format_student_title(s["full_name"], s["username"], s["telegram_id"])
-
-        lines.append(f"{i}) {name} (ID={s['telegram_id']})")
-
-    await state.update_data(add_extra_student_ids=ids)
     await state.set_state(AddExtraLessonStates.waiting_student)
-    await message.answer("\n".join(lines), reply_markup=back_keyboard())
+
+    # Если у тебя уже есть create_action_keyboard(students, prefix, page)
+    # — используем ее, чтобы было красиво и с пагинацией.
+    kb = create_action_keyboard(students, prefix="addextra", page=0)
+
+    await message.answer(
+        "Кому назначаем доп. занятие? Выбери ученика:",
+        reply_markup=kb
+    )
+
+
+@router.callback_query(lambda c: c.data.startswith("addextra_page_"))
+async def addextra_page_cb(callback_query: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    students = data.get("addextra_students", [])
+    page = int(callback_query.data.split("_")[-1])
+
+    kb = create_action_keyboard(students, prefix="addextra", page=page)
+    await callback_query.message.edit_reply_markup(reply_markup=kb)
+    await callback_query.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("addextra_student_"))
+async def addextra_student_cb(callback_query: CallbackQuery, state: FSMContext):
+    student_id = int(callback_query.data.split("_")[-1])
+
+    await state.update_data(addextra_student_id=student_id)
+    await state.set_state(AddExtraLessonStates.waiting_date)
+
+    await callback_query.message.answer(
+        "Выбери дату доп. занятия (последние 14 дней):",
+        reply_markup=addextra_dates_kb(days_back=14),
+    )
+    await callback_query.answer()
+
+
+@router.callback_query(lambda c: c.data == "addextra_back_to_dates")
+async def addextra_back_to_dates_cb(callback_query: CallbackQuery, state: FSMContext):
+    await state.set_state(AddExtraLessonStates.waiting_date)
+    await callback_query.message.answer(
+        "Выбери дату доп. занятия:",
+        reply_markup=addextra_dates_kb(days_back=14),
+    )
+    await callback_query.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("addextra_date_"))
+async def addextra_date_cb(callback_query: CallbackQuery, state: FSMContext):
+    date_iso = callback_query.data.split("_", 2)[2]  # YYYY-MM-DD
+    await state.update_data(addextra_date=date_iso)
+    await state.set_state(AddExtraLessonStates.waiting_time)
+
+    await callback_query.message.answer(
+        "Теперь выбери время:",
+        reply_markup=addextra_times_kb(17, 23),
+    )
+    await callback_query.answer()
+
+
+@router.callback_query(lambda c: c.data == "addextra_time_other")
+async def addextra_time_other_cb(callback_query: CallbackQuery, state: FSMContext):
+    # остаёмся в waiting_time, но просим текстом
+    await state.set_state(AddExtraLessonStates.waiting_time)
+    await callback_query.message.answer("Ок, введи время в формате HH:MM (например 18:30):")
+    await callback_query.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("addextra_time_"))
+async def addextra_time_cb(callback_query: CallbackQuery, state: FSMContext):
+    t = callback_query.data.split("_", 2)[2]  # HH:MM
+    await state.update_data(addextra_time=t)
+    await state.set_state(AddExtraLessonStates.waiting_topic)
+
+    await callback_query.message.answer(
+        "Отлично! Теперь введи тему доп. занятия (можно коротко):",
+        reply_markup=back_keyboard(),
+    )
+    await callback_query.answer()
+
+
+@router.callback_query(lambda c: c.data == "addextra_cancel")
+async def addextra_cancel_cb(callback_query: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback_query.message.answer("Ок, отменил назначение доп. занятия.", reply_markup=main_menu_keyboard(True))
+    await callback_query.answer()
+
 
 
 @router.message(AddExtraLessonStates.waiting_student)
