@@ -11198,11 +11198,12 @@ async def set_topic_delete_ask(callback_query: CallbackQuery):
     builder.adjust(1)
 
     await callback_query.message.answer(
-        "🗑️ <b>Удалить занятие из истории?</b>\n"
-        "Это действие нельзя отменить.",
+        "🗑️ <b>Пометить занятие как не состоявшееся?</b>\n"
+        "Оно исчезнет из «Указать темы» и не будет создаваться снова.",
         parse_mode="HTML",
         reply_markup=builder.as_markup()
     )
+
     await callback_query.answer()
 
 
@@ -11219,13 +11220,18 @@ async def set_topic_delete_confirm(callback_query: CallbackQuery):
         await callback_query.answer("Эта функция только для преподавателя.")
         return
 
-    deleted = delete_lesson_history(history_id)
-    if not deleted:
+    # НЕ удаляем запись физически — иначе она будет снова создана автогенерацией истории.
+    # Вместо этого помечаем занятие как отменённое.
+    updated = update_lesson_history(history_id, status="cancelled", topic="отменено")
+    if not updated:
         await callback_query.answer("Запись не найдена", show_alert=True)
         return
 
-    await callback_query.message.answer("✅ Занятие удалено из истории.")
+    await callback_query.message.answer(
+        "✅ Занятие помечено как не состоявшееся (скрыто из списка «Указать темы»)."
+    )
     await callback_query.answer()
+
 
     # Показать обновлённый список занятий без темы
     lessons_without_topic = get_done_lessons_without_topic(min_after_start_minutes=30)
