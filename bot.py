@@ -1138,6 +1138,7 @@ def create_action_keyboard(students, action_type: str, page: int = 0):
         "delete": "🗑️",
         "slot": "➕",
         "extra": "✨",
+        "addextra": "✨",
         "links": "🔗",
         "edit": "✏️",
         "reschedule": "🔄",
@@ -11520,30 +11521,39 @@ async def cmd_add_extra(message: Message, state: FSMContext):
 
     await state.set_state(AddExtraLessonStates.waiting_student)
 
-    # Если у тебя уже есть create_action_keyboard(students, prefix, page)
-    # — используем ее, чтобы было красиво и с пагинацией.
-    kb = create_action_keyboard(students, prefix="addextra", page=0)
+    keyboard, _ = create_action_keyboard(students, "addextra", page=0)
 
     await message.answer(
         "Кому назначаем доп. занятие? Выбери ученика:",
-        reply_markup=kb
+        reply_markup=keyboard
     )
+
 
 
 @router.callback_query(lambda c: c.data.startswith("addextra_page_"))
 async def addextra_page_cb(callback_query: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     students = data.get("addextra_students", [])
-    page = int(callback_query.data.split("_")[-1])
+    if not students:
+        await callback_query.answer("Нет учеников")
+        return
 
-    kb = create_action_keyboard(students, prefix="addextra", page=page)
-    await callback_query.message.edit_reply_markup(reply_markup=kb)
+    prefix = "addextra_page_"
+    page = int(callback_query.data[len(prefix):])
+
+    keyboard, _ = create_action_keyboard(students, "addextra", page=page)
+    await callback_query.message.edit_reply_markup(reply_markup=keyboard)
     await callback_query.answer()
+
 
 
 @router.callback_query(lambda c: c.data.startswith("addextra_student_"))
 async def addextra_student_cb(callback_query: CallbackQuery, state: FSMContext):
-    student_id = int(callback_query.data.split("_")[-1])
+    prefix = "addextra_student_"
+    rest = callback_query.data[len(prefix):]  # "{student_id}_{page}"
+    last_us = rest.rfind("_")
+    student_id = int(rest[:last_us])
+    # page = int(rest[last_us + 1:])  # не используем, но формат учитываем
 
     await state.update_data(addextra_student_id=student_id)
     await state.set_state(AddExtraLessonStates.waiting_date)
@@ -11553,6 +11563,7 @@ async def addextra_student_cb(callback_query: CallbackQuery, state: FSMContext):
         reply_markup=addextra_dates_kb(days_back=14),
     )
     await callback_query.answer()
+
 
 
 @router.callback_query(lambda c: c.data == "addextra_back_to_dates")
@@ -11567,7 +11578,9 @@ async def addextra_back_to_dates_cb(callback_query: CallbackQuery, state: FSMCon
 
 @router.callback_query(lambda c: c.data.startswith("addextra_date_"))
 async def addextra_date_cb(callback_query: CallbackQuery, state: FSMContext):
-    date_iso = callback_query.data.split("_", 2)[2]  # YYYY-MM-DD
+    prefix = "addextra_date_"  # YYYY-MM-DD дальше
+    date_iso = callback_query.data[len(prefix):]
+
     await state.update_data(addextra_date=date_iso)
     await state.set_state(AddExtraLessonStates.waiting_time)
 
