@@ -10431,7 +10431,19 @@ async def show_global_schedule(message: Message):
         weekday = lesson["weekday"]
         name = lesson["full_name"] or lesson["username"] or lesson["telegram_id"]
         time = lesson["time"]
-        schedule_by_day[weekday].append((name, time))
+        schedule_by_day[weekday].append((name, time))    for lesson in lessons:
+        weekday = lesson["weekday"]
+        full_name = lesson["full_name"]
+        username = lesson["username"]
+        tg_id = lesson["telegram_id"]
+
+        # name — как раньше, но telegram_id приводим к строке
+        name = full_name or (f"@{username}" if username else str(tg_id))
+        time = lesson["time"]
+
+        # ВАЖНО: передаём username третьим элементом — тогда _fmt_name() добавит (@username) к ФИО
+        schedule_by_day[weekday].append((name, time, username))
+
 
     lines = []
 
