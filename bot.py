@@ -11553,9 +11553,19 @@ async def addextra_student_cb(callback_query: CallbackQuery, state: FSMContext):
     rest = callback_query.data[len(prefix):]  # "{student_id}_{page}"
     last_us = rest.rfind("_")
     student_id = int(rest[:last_us])
-    # page = int(rest[last_us + 1:])  # не используем, но формат учитываем
 
-    await state.update_data(addextra_student_id=student_id)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM students WHERE id = ?", (student_id,))
+    student = cur.fetchone()
+    if not student:
+        await callback_query.answer("Ученик не найден", show_alert=True)
+        return
+
+    await state.update_data(
+        add_extra_student_id=student["id"],
+        add_extra_student_telegram_id=student["telegram_id"],
+        add_extra_student_name=student["full_name"] or student["username"] or str(student["telegram_id"]),
+    )
     await state.set_state(AddExtraLessonStates.waiting_date)
 
     await callback_query.message.answer(
@@ -11563,6 +11573,7 @@ async def addextra_student_cb(callback_query: CallbackQuery, state: FSMContext):
         reply_markup=addextra_dates_kb(days_back=14),
     )
     await callback_query.answer()
+
 
 
 
@@ -11581,7 +11592,13 @@ async def addextra_date_cb(callback_query: CallbackQuery, state: FSMContext):
     prefix = "addextra_date_"  # YYYY-MM-DD дальше
     date_iso = callback_query.data[len(prefix):]
 
-    await state.update_data(addextra_date=date_iso)
+    try:
+        lesson_date = dt_date.fromisoformat(date_iso)
+    except Exception:
+        await callback_query.answer("Некорректная дата", show_alert=True)
+        return
+
+    await state.update_data(add_extra_date=lesson_date)
     await state.set_state(AddExtraLessonStates.waiting_time)
 
     await callback_query.message.answer(
@@ -11589,6 +11606,7 @@ async def addextra_date_cb(callback_query: CallbackQuery, state: FSMContext):
         reply_markup=addextra_times_kb(17, 23),
     )
     await callback_query.answer()
+
 
 
 @router.callback_query(lambda c: c.data == "addextra_time_other")
@@ -11601,15 +11619,25 @@ async def addextra_time_other_cb(callback_query: CallbackQuery, state: FSMContex
 
 @router.callback_query(lambda c: c.data.startswith("addextra_time_"))
 async def addextra_time_cb(callback_query: CallbackQuery, state: FSMContext):
-    t = callback_query.data.split("_", 2)[2]  # HH:MM
-    await state.update_data(addextra_time=t)
+    prefix = "addextra_time_"
+    t_str = callback_query.data[len(prefix):]  # HH:MM
+
+    try:
+        hh, mm = map(int, t_str.split(":"))
+        lesson_time = dtime(hh, mm)
+    except Exception:
+        await callback_query.answer("Некорректное время", show_alert=True)
+        return
+
+    await state.update_data(add_extra_time=lesson_time)
     await state.set_state(AddExtraLessonStates.waiting_topic)
 
     await callback_query.message.answer(
-        "Отлично! Теперь введи тему доп. занятия (можно коротко):",
+        "Введите тему дополнительного занятия (или '-' чтобы пропустить):",
         reply_markup=back_keyboard(),
     )
     await callback_query.answer()
+
 
 
 @router.callback_query(lambda c: c.data == "addextra_cancel")
