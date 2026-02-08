@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 import os
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import timedelta, date as dt_date
+from aiogram.exceptions import TelegramRetryAfter
+
 
 
 from aiogram import Bot, Dispatcher, Router
@@ -8384,6 +8386,46 @@ async def edit_links_set_links(message: Message, state: FSMContext):
 
 # ---------- ОБЪЯВЛЕНИЯ ДЛЯ УЧЕНИКОВ ----------
 
+async def _run_broadcast_send(report_to_tg_id: int, recipients: list[int], text: str):
+    """
+    Фоновая отправка рассылки, чтобы не блокировать polling.
+    report_to_tg_id — кому отправить итоговый отчёт (преподавателю).
+    """
+    sent = 0
+    failed = 0
+
+    for uid in recipients:
+        # маленькая пауза, чтобы не упираться в лимиты Telegram
+        await asyncio.sleep(0.05)
+
+        try:
+            await bot.send_message(uid, text)
+            sent += 1
+
+        except TelegramRetryAfter as e:
+            # Telegram сказал подождать N секунд — ждём и пробуем 1 раз повторить
+            try:
+                await asyncio.sleep(float(getattr(e, "retry_after", 1)))
+                await bot.send_message(uid, text)
+                sent += 1
+            except Exception as e2:
+                failed += 1
+                logging.error(f"[broadcast] retry failed for {uid}: {e2}")
+
+        except Exception as e:
+            failed += 1
+            logging.error(f"[broadcast] send failed for {uid}: {e}")
+
+    # Отчёт преподавателю
+    try:
+        await bot.send_message(
+            report_to_tg_id,
+            f"📢 Рассылка завершена.\n✅ Отправлено: {sent}\n❌ Ошибок: {failed}\n👥 Получателей: {len(recipients)}",
+        )
+    except Exception as e:
+        logging.error(f"[broadcast] failed to send report to teacher {report_to_tg_id}: {e}")
+
+
 
 async def start_broadcast_wizard(message: Message, state: FSMContext):
     if not is_teacher(message):
@@ -8587,7 +8629,77 @@ async def broadcast_enter_text(message: Message, state: FSMContext):
     await message.answer(
         f"Объявление отправлено {sent} ученикам.",
         reply_markup=main_menu_keyboard(True),
+    )@router.message(BroadcastStates.entering_text)
+async def broadcast_enter_text(message: Message, state: FSMContext):
+    # Важно: message.text может быть None (например, если прислали стикер/фото)
+    text = (message.text or "").strip()
+
+    if text == BACK_TEXT:
+        await state.clear()
+        await message.answer(
+            "Отменяю рассылку. Возвращаю в главное меню.",
+            reply_markup=main_menu_keyboard(True),
+        )
+        return
+
+    if not text:
+        await message.answer(
+            "Похоже, объявление пустое. Напиши текст, пожалуйста.",
+            reply_markup=back_keyboard(),
+        )
+        return
+
+    data = await state.get_data()
+    scope = data.get("broadcast_scope")
+
+    recipients: list[int] = []  # telegram_id
+
+    if scope == "all":
+        students = get_all_students()
+        for s in students:
+            tg_id = s["telegram_id"]
+            if tg_id:
+                recipients.append(tg_id)
+        recipients = list(dict.fromkeys(recipients))
+
+    elif scope == "group":
+        ids: list[int] = data.get("broadcast_student_ids", [])
+        cur = conn.cursor()
+        for sid in ids:
+            cur.execute("SELECT telegram_id FROM students WHERE id = ?", (sid,))
+            row = cur.fetchone()
+            tg_id = row["telegram_id"] if row else None
+            if tg_id:
+                recipients.append(tg_id)
+        recipients = list(dict.fromkeys(recipients))
+
+    else:
+        await state.clear()
+        await message.answer(
+            "Что-то пошло не так, попробуй ещё раз с /broadcast.",
+            reply_markup=main_menu_keyboard(True),
+        )
+        return
+
+    if not recipients:
+        await state.clear()
+        await message.answer(
+            "Не удалось найти получателей рассылки.",
+            reply_markup=main_menu_keyboard(True),
+        )
+        return
+
+    # Сразу освобождаем состояние и возвращаем меню — чтобы бот НЕ зависал на рассылке
+    await state.clear()
+    await message.answer(
+        f"📢 Начинаю рассылку на {len(recipients)} учеников.\n"
+        f"Я пришлю отчёт сюда, когда закончу.",
+        reply_markup=main_menu_keyboard(True),
     )
+
+    # Фоновая отправка, чтобы polling не блокировался
+    asyncio.create_task(_run_broadcast_send(message.from_user.id, recipients, text))
+
 
 
 # ---------- УДАЛЕНИЕ СЛОТА ПРЕПОДАВАТЕЛЕМ ----------
