@@ -567,15 +567,17 @@ def main_menu_keyboard(is_teacher_flag: bool) -> ReplyKeyboardMarkup:
         buttons = [
             [
                 KeyboardButton(text="👥 Расписание"),
+                KeyboardButton(text="📚 Указать темы"),
                 KeyboardButton(text="➕ Добавить занятие"),
             ],
             [
                 KeyboardButton(text="✏️ Задать домашку"),
                 KeyboardButton(text="❌ Отменить занятие"),
+                KeyboardButton(text="📚 Домашки учеников"),
 
             ],
             [
-                KeyboardButton(text="📚 Домашки учеников"),
+                KeyboardButton(text="📢 Объявление"),
                 KeyboardButton(text="🧾 История ученика"),
                 KeyboardButton(text="📝 Добавить занятие в историю"),
             ],
@@ -587,8 +589,8 @@ def main_menu_keyboard(is_teacher_flag: bool) -> ReplyKeyboardMarkup:
             ],
             [
 
-                KeyboardButton(text="📢 Объявление"),
-                KeyboardButton(text="📚 Указать темы"),
+
+
             ],
             [
                 KeyboardButton(text="📅 Массовая отмена"),
