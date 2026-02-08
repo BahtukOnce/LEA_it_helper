@@ -11800,10 +11800,22 @@ async def add_extra_enter_reminder(message: Message, state: FSMContext):
     if topic:
         message_text += f"Тема: {topic}\n"
 
-    message_text += f"\nЭто разовое занятие, не связанное с регулярным расписанием."
+    # ... вы уже собрали message_text выше
+
+    # Заканчиваем описание (если у вас строка была оборвана — сделайте её нормальной)
+    message_text += "\nЭто разовое занятие, оно не повторяется по расписанию."
+
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="✅ Да, добавить")],
+            [KeyboardButton(text="❌ Нет, отменить")],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
 
     await state.set_state(AddExtraLessonStates.confirming)
-    await message.answer(message_text, reply_markup=kb)
+    await message.answer(message_text, parse_mode="HTML", reply_markup=kb)
 
 
 @router.message(AddExtraLessonStates.confirming)
