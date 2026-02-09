@@ -248,13 +248,9 @@ bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 dp.include_router(router)
-
 setup_buffered_logging(bot)
-logging.info("✅ Buffered logging enabled: /logs доступен админам")
+logging.info("🧾 Buffered logging ENABLED")
 
-
-setup_telegram_logging(bot)
-logging.error("✅ Telegram error-logger подключен (будет слать ERROR/EXCEPTION в TEACHER_IDS)")
 
 
 DB_PATH = "data/LEA_it_bot.db"
