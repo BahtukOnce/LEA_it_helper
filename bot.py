@@ -104,6 +104,7 @@ class Paginator:
 
 
 load_dotenv()
+cleanup_old_requests()
 
 API_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -3409,6 +3410,8 @@ def create_change_request(
 
 
 def get_pending_requests():
+    cleanup_old_requests()
+
     cur = conn.cursor()
     cur.execute(
         """
@@ -6252,6 +6255,30 @@ async def reject_request_callback(callback_query: CallbackQuery):
             pass
 
 
+from datetime import date
+import sqlite3
+import logging
+
+def cleanup_old_requests():
+    today = date.today().isoformat()
+
+    try:
+        with sqlite3.connect(DB_PATH, timeout=30) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                DELETE FROM transfer_requests
+                WHERE request_date < ?
+            """, (today,))
+
+            deleted = cursor.rowcount
+            conn.commit()
+
+            if deleted:
+                logging.info(f"🧹 Удалено старых заявок: {deleted}")
+
+    except Exception:
+        logging.exception("cleanup_old_requests failed")
 
 
 # ---------- МНОГОШАГОВЫЙ /move ----------
@@ -12049,6 +12076,8 @@ async def reminder_loop_with_extras():
 # Обновляем запуск reminder_loop в main()
 async def main():
     init_db()
+    cleanup_old_requests()
+
     ensure_students_has_price()
     create_extra_lessons_table()  # Создаем таблицу если не существует
     asyncio.create_task(reminder_loop_with_extras())  # Используем обновленную версию
