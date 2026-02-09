@@ -6162,6 +6162,9 @@ async def back_to_requests_list(callback_query: CallbackQuery):
 @router.callback_query(lambda c: c.data.startswith(APPROVE_REQUEST_PREFIX))
 async def approve_request_callback(callback_query: CallbackQuery):
     # approve_req_{req_id}_{page}_{student_id}
+    await callback_query.answer(f"DEBUG approve: {callback_query.data}", show_alert=True)
+    return
+
     tail = callback_query.data[len(APPROVE_REQUEST_PREFIX):]
     parts = tail.split("_")
 
@@ -6187,6 +6190,9 @@ async def approve_request_callback(callback_query: CallbackQuery):
 @router.callback_query(lambda c: c.data.startswith(REJECT_REQUEST_PREFIX))
 async def reject_request_callback(callback_query: CallbackQuery):
     # reject_req_{req_id}_{page}_{student_id}
+    await callback_query.answer(f"DEBUG reject: {callback_query.data}", show_alert=True)
+    return
+
     tail = callback_query.data[len(REJECT_REQUEST_PREFIX):]
     parts = tail.split("_")
 
