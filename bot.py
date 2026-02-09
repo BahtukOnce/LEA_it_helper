@@ -3637,52 +3637,67 @@ def update_change_request_status(req_id: int, status: str):
 
 
 def approve_transfer_request(req_id: int):
-    """
-    Одобрение запроса:
-    - one_time  -> lesson_overrides(change_kind='one_time')
-    - cancel    -> lesson_overrides(change_kind='cancel')
-    - permanent -> обновляем weekly_lessons (weekday берём из new_date.weekday())
-    Возвращает dict запроса (для уведомлений) либо None.
-    """
+    log_step("APPROVE", 10, "start", req_id=req_id)
+
     r = get_change_request_by_id(req_id)
-    if not r or r["status"] != "pending":
+    if not r:
+        log_step("APPROVE", 11, "request not found", req_id=req_id)
+        return None
+
+    log_step(
+        "APPROVE", 12, "request loaded",
+        kind=r["change_kind"],
+        status=r["status"],
+        weekly_lesson_id=r["weekly_lesson_id"]
+    )
+
+    if r["status"] != "pending":
+        log_step("APPROVE", 13, "request already processed", status=r["status"])
         return None
 
     wl = get_weekly_lesson_by_id(r["weekly_lesson_id"])
     if not wl:
+        log_step("APPROVE", 14, "weekly lesson not found")
         return None
 
-    # даты/время
-    d = date.fromisoformat(r["new_date"]) if r["new_date"] else None
+    log_step(
+        "APPROVE", 15, "weekly lesson loaded",
+        weekday=wl["weekday"],
+        time=wl["time"]
+    )
 
+    d = date.fromisoformat(r["new_date"]) if r["new_date"] else None
     new_time = parse_time_str(r["new_time"]) if r["new_time"] else parse_time_str(r["old_time"])
 
+    log_step(
+        "APPROVE", 16, "parsed dates",
+        override_date=d,
+        new_time=new_time
+    )
+
     if r["change_kind"] in ("one_time", "cancel"):
-        # original_date/original_time можно хранить, но в текущей логике не критично
         create_lesson_override(
             weekly_lesson_id=r["weekly_lesson_id"],
-            override_date=d,  # ✅ правильный параметр
+            override_date=d,
             new_time=new_time,
             change_kind=r["change_kind"],
             original_date=None,
             original_time=wl["time"],
         )
-
+        log_step("APPROVE", 17, "override created", kind=r["change_kind"])
 
     elif r["change_kind"] == "permanent":
-        # ВАЖНО: у вас new_weekday в БД отдельно не хранится, поэтому берём weekday из new_date
-        new_weekday = d.weekday() if d else int(r["old_weekday"])
-        cur = conn.cursor()
-        cur.execute(
-            "UPDATE weekly_lessons SET weekday=?, time=? WHERE id=?",
-            (new_weekday, new_time.strftime("%H:%M"), r["weekly_lesson_id"])
+        new_weekday = d.weekday()
+        update_weekly_lesson(
+            wl_id=r["weekly_lesson_id"],
+            weekday=new_weekday,
+            time=new_time.strftime("%H:%M")
         )
-        conn.commit()
-
-    else:
-        return None
+        log_step("APPROVE", 18, "weekly lesson updated", weekday=new_weekday)
 
     update_change_request_status(req_id, "approved")
+    log_step("APPROVE", 19, "status updated", status="approved")
+
     return dict(r)
 
 
@@ -6459,7 +6474,11 @@ async def approve_request_callback(callback_query: CallbackQuery):
         pass
 
     try:
+        log_step("APPROVE", 1, "callback received", req_id=req_id)
+
         r = approve_transfer_request(req_id)
+
+        log_step("APPROVE", 5, "approve finished", result=bool(r))
         if not r:
             try:
                 await callback_query.message.edit_text(
@@ -6647,6 +6666,17 @@ async def reject_request_callback(callback_query: CallbackQuery):
             await callback_query.answer("Ошибка при обработке (см. логи).", show_alert=True)
         except Exception:
             pass
+
+def log_step(flow: str, step: int, message: str, **ctx):
+    """
+    flow: APPROVE / REJECT / CLEANUP / etc
+    step: номер шага
+    message: что произошло
+    ctx: любые параметры (req_id, user_id, dates...)
+    """
+    context = " ".join(f"{k}={v}" for k, v in ctx.items())
+    logging.info(f"[{flow}][step={step}] {message} {context}".strip())
+
 
 
 from datetime import date
