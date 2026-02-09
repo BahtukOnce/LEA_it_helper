@@ -3661,12 +3661,13 @@ def approve_transfer_request(req_id: int):
         # original_date/original_time можно хранить, но в текущей логике не критично
         create_lesson_override(
             weekly_lesson_id=r["weekly_lesson_id"],
-            new_date=d,
+            override_date=d,  # ✅ правильный параметр
             new_time=new_time,
-            change_kind=r["change_kind"],  # 'one_time' или 'cancel'
+            change_kind=r["change_kind"],
             original_date=None,
-            original_time=None,
+            original_time=wl["time"],
         )
+
 
     elif r["change_kind"] == "permanent":
         # ВАЖНО: у вас new_weekday в БД отдельно не хранится, поэтому берём weekday из new_date
@@ -6652,17 +6653,26 @@ from datetime import date
 import sqlite3
 
 
-def cleanup_old_requests():
-    today = date.today().isoformat()
+from datetime import datetime, timedelta
+import sqlite3
+import logging
 
+def cleanup_old_requests():
+    """
+    Чистим старые уже-обработанные заявки, чтобы таблица не разрасталась.
+    pending не трогаем.
+    """
     try:
+        cutoff = (datetime.now() - timedelta(days=90)).isoformat(timespec="seconds")
+
         with sqlite3.connect(DB_PATH, timeout=30) as conn:
             cursor = conn.cursor()
 
             cursor.execute("""
-                DELETE FROM transfer_requests
-                WHERE request_date < ?
-            """, (today,))
+                DELETE FROM change_requests
+                WHERE status != 'pending'
+                  AND created_at < ?
+            """, (cutoff,))
 
             deleted = cursor.rowcount
             conn.commit()
@@ -6672,6 +6682,7 @@ def cleanup_old_requests():
 
     except Exception:
         logging.exception("cleanup_old_requests failed")
+
 
 cleanup_old_requests()
 
