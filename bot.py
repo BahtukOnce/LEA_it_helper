@@ -3454,7 +3454,7 @@ def approve_transfer_request(req_id: int):
     Возвращает dict запроса (для уведомлений) либо None.
     """
     r = get_change_request_by_id(req_id)
-    if not r or r.get("status") != "pending":
+    if not r or r["status"] != "pending":
         return None
 
     wl = get_weekly_lesson_by_id(r["weekly_lesson_id"])
@@ -3462,8 +3462,9 @@ def approve_transfer_request(req_id: int):
         return None
 
     # даты/время
-    d = date.fromisoformat(r["new_date"]) if r.get("new_date") else None
-    new_time = parse_time_str(r["new_time"]) if r.get("new_time") else parse_time_str(r["old_time"])
+    d = date.fromisoformat(r["new_date"]) if r["new_date"] else None
+
+    new_time = parse_time_str(r["new_time"]) if r["new_time"] else parse_time_str(r["old_time"])
 
     if r["change_kind"] in ("one_time", "cancel"):
         # original_date/original_time можно хранить, но в текущей логике не критично
@@ -3496,7 +3497,7 @@ def approve_transfer_request(req_id: int):
 def reject_transfer_request(req_id: int):
     """Отклонение запроса. Возвращает dict запроса либо None."""
     r = get_change_request_by_id(req_id)
-    if not r or r.get("status") != "pending":
+    if not r or r["status"] != "pending":
         return None
 
     update_change_request_status(req_id, "rejected")
