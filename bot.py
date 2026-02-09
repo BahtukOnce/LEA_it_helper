@@ -104,7 +104,7 @@ class Paginator:
 
 
 load_dotenv()
-cleanup_old_requests()
+# cleanup_old_requests()
 
 API_TOKEN = os.getenv("BOT_TOKEN")
 
