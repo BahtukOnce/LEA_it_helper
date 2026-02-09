@@ -104,7 +104,7 @@ class Paginator:
 
 
 load_dotenv()
-# cleanup_old_requests()
+
 
 API_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -6280,6 +6280,7 @@ def cleanup_old_requests():
     except Exception:
         logging.exception("cleanup_old_requests failed")
 
+cleanup_old_requests()
 
 # ---------- МНОГОШАГОВЫЙ /move ----------
 
