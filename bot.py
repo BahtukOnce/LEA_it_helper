@@ -6162,56 +6162,95 @@ async def back_to_requests_list(callback_query: CallbackQuery):
 @router.callback_query(lambda c: c.data.startswith(APPROVE_REQUEST_PREFIX))
 async def approve_request_callback(callback_query: CallbackQuery):
     # approve_req_{req_id}_{page}_{student_id}
-    await callback_query.answer(f"DEBUG approve: {callback_query.data}", show_alert=True)
-    return
-
-    tail = callback_query.data[len(APPROVE_REQUEST_PREFIX):]
-    parts = tail.split("_")
-
     try:
+        # быстро закрываем "крутилку" у Telegram
+        await callback_query.answer("⏳ Обрабатываю...")
+
+        tail = callback_query.data[len(APPROVE_REQUEST_PREFIX):]
+        parts = tail.split("_")
+
         req_id = int(parts[0])
         page = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
         student_id = parts[2] if len(parts) > 2 else ""
-    except (ValueError, IndexError):
-        await callback_query.answer("Некорректные данные кнопки.", show_alert=True)
-        return
 
-    # Подтверждаем запрос
-    approved = approve_transfer_request(req_id)
-    if approved:
-        await callback_query.message.edit_text("✅ Запрос успешно одобрен.")
-    else:
-        await callback_query.message.edit_text("❌ Ошибка: запрос не найден или уже обработан.")
+        # Подтверждаем запрос
+        approved = approve_transfer_request(req_id)
 
-    await callback_query.answer()
+        if approved:
+            await callback_query.message.edit_text(
+                "✅ Запрос успешно одобрен.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(
+                        text="⬅️ Назад к списку",
+                        callback_data=f"back_to_requests_list_{page}_{student_id}"
+                    )
+                ]])
+            )
+        else:
+            await callback_query.message.edit_text(
+                "❌ Ошибка: запрос не найден или уже обработан.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(
+                        text="⬅️ Назад к списку",
+                        callback_data=f"back_to_requests_list_{page}_{student_id}"
+                    )
+                ]])
+            )
+
+    except Exception:
+        logging.exception("approve_request_callback failed")
+        # обязательно отвечаем, иначе у клиента будет вечная "крутилка"
+        try:
+            await callback_query.answer("Ошибка при обработке (см. логи).", show_alert=True)
+        except Exception:
+            pass
+
 
 
 
 @router.callback_query(lambda c: c.data.startswith(REJECT_REQUEST_PREFIX))
 async def reject_request_callback(callback_query: CallbackQuery):
     # reject_req_{req_id}_{page}_{student_id}
-    await callback_query.answer(f"DEBUG reject: {callback_query.data}", show_alert=True)
-    return
-
-    tail = callback_query.data[len(REJECT_REQUEST_PREFIX):]
-    parts = tail.split("_")
-
     try:
+        await callback_query.answer("⏳ Обрабатываю...")
+
+        tail = callback_query.data[len(REJECT_REQUEST_PREFIX):]
+        parts = tail.split("_")
+
         req_id = int(parts[0])
         page = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
         student_id = parts[2] if len(parts) > 2 else ""
-    except (ValueError, IndexError):
-        await callback_query.answer("Некорректные данные кнопки.", show_alert=True)
-        return
 
-    # Отклоняем запрос
-    rejected = reject_transfer_request(req_id)
-    if rejected:
-        await callback_query.message.edit_text("🚫 Запрос отклонен.")
-    else:
-        await callback_query.message.edit_text("❌ Ошибка: запрос не найден или уже обработан.")
+        rejected = reject_transfer_request(req_id)
 
-    await callback_query.answer()
+        if rejected:
+            await callback_query.message.edit_text(
+                "🚫 Запрос отклонён.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(
+                        text="⬅️ Назад к списку",
+                        callback_data=f"back_to_requests_list_{page}_{student_id}"
+                    )
+                ]])
+            )
+        else:
+            await callback_query.message.edit_text(
+                "❌ Ошибка: запрос не найден или уже обработан.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(
+                        text="⬅️ Назад к списку",
+                        callback_data=f"back_to_requests_list_{page}_{student_id}"
+                    )
+                ]])
+            )
+
+    except Exception:
+        logging.exception("reject_request_callback failed")
+        try:
+            await callback_query.answer("Ошибка при обработке (см. логи).", show_alert=True)
+        except Exception:
+            pass
+
 
 
 
