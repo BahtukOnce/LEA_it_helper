@@ -6128,268 +6128,85 @@ async def view_request_details(callback_query: CallbackQuery):
     await callback_query.answer()
 
 
-@router.callback_query(lambda c: c.data == "back_to_requests_list")
+@router.callback_query(lambda c: c.data.startswith("back_to_requests_list"))
 async def back_to_requests_list(callback_query: CallbackQuery):
-    """Возврат к списку запросов"""
+    # back_to_requests_list_{page}_{student_id}
+    parts = callback_query.data.split("_")
+
+    # parts = ["back", "to", "requests", "list", "{page}", "{student_id}"]
+    try:
+        page = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else 0
+        student_id = parts[5] if len(parts) > 5 else ""
+    except (ValueError, IndexError):
+        page = 0
+        student_id = ""
+
     rows = get_pending_requests()
     if not rows:
         await callback_query.message.edit_text("Нет ожидающих запросов на перенос/отмену.")
         await callback_query.answer()
         return
 
+    requests_kb, pagination_kb, total_pages = create_requests_keyboard(rows, page=page, student_id=student_id)
+
     await callback_query.message.edit_text(
-        "📜 <b>Ожидающие запросы:</b>\n\n"
+        f"📜 <b>Ожидающие запросы (страница {page + 1}/{total_pages}):</b>\n\n"
         "Нажми на запрос для просмотра деталей и действий:",
         parse_mode="HTML",
-        reply_markup=create_requests_keyboard(rows)
+        reply_markup=requests_kb
     )
     await callback_query.answer()
 
 
+
 @router.callback_query(lambda c: c.data.startswith(APPROVE_REQUEST_PREFIX))
 async def approve_request_callback(callback_query: CallbackQuery):
-    """Одобрение запроса через кнопку"""
-    req_id = int(callback_query.data[len(APPROVE_REQUEST_PREFIX):])
-
-    if not is_teacher(callback_query):
-        await callback_query.answer("Эта функция только для преподавателя.")
-        return
-
-    r = get_change_request_by_id(req_id)
-    if not r:
-        await callback_query.answer("Запрос с таким ID не найден.")
-        return
-
-    if r["status"] != "pending":
-        await callback_query.answer(f"Запрос уже имеет статус {r['status']}.")
-        return
-
-    weekly_lesson_id = r["weekly_lesson_id"]
-    change_kind = r["change_kind"]
-    new_date = date.fromisoformat(r["new_date"])
-    new_time_str = r["new_time"]
-    hh, mm = map(int, new_time_str.split(":"))
-    new_time = dtime(hh, mm)
-
-    wl = get_weekly_lesson_by_id(weekly_lesson_id)
-    if not wl:
-        await callback_query.answer("Исходный слот не найден. Возможно, он был удалён.")
-        update_change_request_status(req_id, "rejected")
-        return
-
-    if change_kind == "permanent":
-        new_weekday = new_date.weekday()
-        cur = conn.cursor()
-        cur.execute(
-            """
-            UPDATE weekly_lessons
-            SET weekday = ?, time = ?
-            WHERE id = ?
-            """,
-            (new_weekday, new_time_str, weekly_lesson_id),
-        )
-        conn.commit()
-
-        # Отправляем уведомление ученику о постоянном изменении
-        await notify_permanent_change(
-            student_telegram_id=wl["telegram_id"],
-            old_weekday=wl["weekday"],
-            old_time=wl["time"],
-            new_weekday=new_weekday,
-            new_time=new_time_str
-        )
-
-        result_text = (
-            f"Новый слот: {weekday_to_name(new_weekday)} в {new_time_str} (еженедельно)."
-        )
-    elif change_kind == "one_time":
-        # Проверяем, есть ли уже оверрайд на эту дату
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT id FROM lesson_overrides 
-            WHERE weekly_lesson_id = ? AND date = ?
-            """,
-            (weekly_lesson_id, new_date.isoformat())
-        )
-        existing_override = cur.fetchone()
-
-        # Если есть оверрайд, сохраняем оригинальные данные
-        original_date = None
-        original_time = None
-        if existing_override:
-            cur.execute(
-                """
-                SELECT date, new_time FROM lesson_overrides 
-                WHERE id = ?
-                """,
-                (existing_override["id"],)
-            )
-            old_override = cur.fetchone()
-            if old_override:
-                original_date = date.fromisoformat(old_override["date"])
-                original_time = old_override["new_time"]
-
-        student_data = create_lesson_override(
-            weekly_lesson_id=weekly_lesson_id,
-            override_date=new_date,
-            new_time=new_time,
-            change_kind="one_time",
-            original_date=original_date,
-            original_time=original_time
-        )
-
-        # Отправляем уведомление ученику о разовом переносе
-        if student_data and student_data["telegram_id"]:
-            await notify_one_time_change(
-                student_telegram_id=student_data["telegram_id"],
-                change_date=new_date,
-                new_time=new_time_str,
-                old_weekday=wl["weekday"],
-                old_time=wl["time"],
-                is_cancellation=False
-            )
-
-        result_text = (
-            f"Разовый перенос на {new_date.strftime('%d.%m.%Y')} в {new_time_str}. "
-            f"Регулярный слот остаётся без изменений."
-        )
-    elif change_kind == "cancel":
-        hh2, mm2 = map(int, wl["time"].split(":"))
-        normal_time = dtime(hh2, mm2)
-
-        # Проверяем, есть ли уже оверрайд на эту дату
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT id FROM lesson_overrides 
-            WHERE weekly_lesson_id = ? AND date = ?
-            """,
-            (weekly_lesson_id, new_date.isoformat())
-        )
-        existing_override = cur.fetchone()
-
-        # Если есть оверрайд, сохраняем оригинальные данные
-        original_date = None
-        original_time = None
-        if existing_override:
-            cur.execute(
-                """
-                SELECT date, new_time FROM lesson_overrides 
-                WHERE id = ?
-                """,
-                (existing_override["id"],)
-            )
-            old_override = cur.fetchone()
-            if old_override:
-                original_date = date.fromisoformat(old_override["date"])
-                original_time = old_override["new_time"]
-
-        student_data = create_lesson_override(
-            weekly_lesson_id=weekly_lesson_id,
-            override_date=new_date,
-            new_time=normal_time,
-            change_kind="cancel",
-            original_date=original_date,
-            original_time=original_time
-        )
-
-        # Отправляем уведомление ученику об отмене
-        if student_data and student_data["telegram_id"]:
-            await notify_one_time_change(
-                student_telegram_id=student_data["telegram_id"],
-                change_date=new_date,
-                new_time=wl["time"],  # Обычное время
-                old_weekday=wl["weekday"],
-                old_time=wl["time"],
-                is_cancellation=True
-            )
-
-        result_text = (
-            f"Занятие {new_date.strftime('%d.%m.%Y')} в {wl['time']} ОТМЕНЕНО разово. "
-            f"Регулярный слот остаётся без изменений."
-        )
-    else:
-        result_text = (
-            f"Тип изменения {change_kind} не поддержан, но запрос помечен как одобрен."
-        )
-
-    update_change_request_status(req_id, "approved")
+    # approve_req_{req_id}_{page}_{student_id}
+    tail = callback_query.data[len(APPROVE_REQUEST_PREFIX):]
+    parts = tail.split("_")
 
     try:
-        text = f"✅ <b>Ваш запрос #{req_id} одобрен!</b>\n\n{result_text}"
-        if r["comment"]:
-            text += f"\n\n💬 <b>Ваш комментарий:</b> {r['comment']}"
-        await bot.send_message(
-            r["telegram_id"],
-            text,
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        logging.error(f"Не удалось отправить сообщение ученику: {e}")
-
-    await callback_query.answer(f"Запрос #{req_id} одобрен")
-
-    # Возвращаемся к списку запросов
-    rows = get_pending_requests()
-    if not rows:
-        await callback_query.message.edit_text("Нет ожидающих запросов на перенос/отмену.")
+        req_id = int(parts[0])
+        page = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        student_id = parts[2] if len(parts) > 2 else ""
+    except (ValueError, IndexError):
+        await callback_query.answer("Некорректные данные кнопки.", show_alert=True)
         return
 
-    await callback_query.message.edit_text(
-        "📜 <b>Ожидающие запросы:</b>\n\n"
-        "Нажми на запрос для просмотра деталей и действий:",
-        parse_mode="HTML",
-        reply_markup=create_requests_keyboard(rows)
-    )
+    # Подтверждаем запрос
+    approved = approve_transfer_request(req_id)
+    if approved:
+        await callback_query.message.edit_text("✅ Запрос успешно одобрен.")
+    else:
+        await callback_query.message.edit_text("❌ Ошибка: запрос не найден или уже обработан.")
+
+    await callback_query.answer()
+
 
 
 @router.callback_query(lambda c: c.data.startswith(REJECT_REQUEST_PREFIX))
 async def reject_request_callback(callback_query: CallbackQuery):
-    """Отклонение запроса через кнопку"""
-    req_id = int(callback_query.data[len(REJECT_REQUEST_PREFIX):])
-
-    if not is_teacher(callback_query):
-        await callback_query.answer("Эта функция только для преподавателя.")
-        return
-
-    r = get_change_request_by_id(req_id)
-    if not r:
-        await callback_query.answer("Запрос с таким ID не найден.")
-        return
-
-    if r["status"] != "pending":
-        await callback_query.answer(f"Запрос уже имеет статус {r['status']}.")
-        return
-
-    update_change_request_status(req_id, "rejected")
+    # reject_req_{req_id}_{page}_{student_id}
+    tail = callback_query.data[len(REJECT_REQUEST_PREFIX):]
+    parts = tail.split("_")
 
     try:
-        text = f"❌ <b>Ваш запрос #{req_id} отклонён.</b>\n\n"
-        if r["comment"]:
-            text += f"💬 <b>Ваш комментарий:</b> {r['comment']}"
-        await bot.send_message(
-            r["telegram_id"],
-            text,
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        logging.error(f"Не удалось отправить сообщение ученику: {e}")
-
-    await callback_query.answer(f"Запрос #{req_id} отклонён")
-
-    # Возвращаемся к списку запросов
-    rows = get_pending_requests()
-    if not rows:
-        await callback_query.message.edit_text("Нет ожидающих запросов на перенос/отмену.")
+        req_id = int(parts[0])
+        page = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        student_id = parts[2] if len(parts) > 2 else ""
+    except (ValueError, IndexError):
+        await callback_query.answer("Некорректные данные кнопки.", show_alert=True)
         return
 
-    await callback_query.message.edit_text(
-        "📜 <b>Ожидающие запросы:</b>\n\n"
-        "Нажми на запрос для просмотра деталей и действий:",
-        parse_mode="HTML",
-        reply_markup=create_requests_keyboard(rows)
-    )
+    # Отклоняем запрос
+    rejected = reject_transfer_request(req_id)
+    if rejected:
+        await callback_query.message.edit_text("🚫 Запрос отклонен.")
+    else:
+        await callback_query.message.edit_text("❌ Ошибка: запрос не найден или уже обработан.")
+
+    await callback_query.answer()
+
 
 
 # ---------- МНОГОШАГОВЫЙ /move ----------
