@@ -10539,11 +10539,11 @@ async def show_global_schedule(message: Message):
 
     schedule_by_day = {i: [] for i in range(7)}
 
-    for lesson in lessons:
-        weekday = lesson["weekday"]
-        name = lesson["full_name"] or lesson["username"] or lesson["telegram_id"]
-        time = lesson["time"]
-        schedule_by_day[weekday].append((name, time))
+    # for lesson in lessons:
+    #     weekday = lesson["weekday"]
+    #     name = lesson["full_name"] or lesson["username"] or lesson["telegram_id"]
+    #     time = lesson["time"]
+    #     schedule_by_day[weekday].append((name, time))
     for lesson in lessons:
         weekday = lesson["weekday"]
         full_name = lesson["full_name"]
