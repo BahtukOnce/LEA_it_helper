@@ -11188,8 +11188,6 @@ async def topics_done_callback(callback_query: CallbackQuery):
     await callback_query.answer()
 
 
-
-
 @router.message(Command("set_topics"))
 async def cmd_set_topics(message: Message):
     """Ручной запуск процесса указания тем (по всей истории)"""
