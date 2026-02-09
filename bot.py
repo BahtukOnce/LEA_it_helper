@@ -11223,6 +11223,15 @@ async def cmd_set_topics(message: Message):
     )
 
 
+@router.message(lambda m: m.text == "📚 Указать темы")
+async def set_topics_from_menu(message: Message):
+    # то же поведение, что и /set_topics
+    if not is_teacher(message):
+        await message.answer("Эта команда только для преподавателя.")
+        return
+    await cmd_set_topics(message)
+
+
 
 async def reminder_loop():
     """
