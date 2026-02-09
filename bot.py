@@ -1,5 +1,5 @@
 import asyncio
-import logging
+
 import sqlite3
 from datetime import datetime, date, time as dtime, timedelta
 from typing import Optional
@@ -28,7 +28,12 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import logging
-...
+import traceback
+import asyncio
+from logging import Handler
+from collections import deque
+from datetime import datetime
+
 logging.info("Logger initialized")
 
 
@@ -120,10 +125,137 @@ TEACHER_IDS = {
 
 logging.basicConfig(level=logging.INFO)
 
+# ===== In-memory log buffer (last N lines) =====
+LOG_BUFFER = deque(maxlen=400)          # сколько строк храним
+LOG_LEVEL_FOR_BUFFER = logging.INFO     # что складываем в буфер
+LOG_TAIL_ENABLED = False                # слать новые логи в TG в реальном времени или нет
+
+
+def _escape_html(s: str) -> str:
+    return (s.replace("&", "&amp;")
+              .replace("<", "&lt;")
+              .replace(">", "&gt;"))
+
+
+class BufferingTelegramHandler(Handler):
+    """
+    1) Всегда пишет логи в кольцевой буфер (если record.levelno >= LOG_LEVEL_FOR_BUFFER)
+    2) Опционально "tail": шлёт новые записи в TG всем админам из TEACHER_IDS
+    """
+    def __init__(self, bot: Bot, admin_ids: set[int], level=logging.DEBUG):
+        super().__init__(level)
+        self.bot = bot
+        self.admin_ids = list(admin_ids)
+        self._sending = False  # защита от рекурсии
+
+    async def _send_to_admins(self, text: str):
+        # ограничение телеграма — режем
+        if len(text) > 3500:
+            text = text[:3500] + "\n…(truncated)"
+        for admin_id in self.admin_ids:
+            try:
+                await self.bot.send_message(
+                    admin_id,
+                    f"🧾 <b>LOG TAIL</b>\n<pre>{_escape_html(text)}</pre>",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+    def emit(self, record: logging.LogRecord):
+        global LOG_BUFFER, LOG_LEVEL_FOR_BUFFER, LOG_TAIL_ENABLED
+
+        try:
+            msg = self.format(record)
+        except Exception:
+            return
+
+        # 1) всегда в буфер (с нужного уровня)
+        if record.levelno >= LOG_LEVEL_FOR_BUFFER:
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            LOG_BUFFER.append(f"{ts} | {record.levelname} | {record.name}\n{msg}")
+
+        # 2) tail по желанию
+        if LOG_TAIL_ENABLED and not self._sending:
+            try:
+                self._sending = True
+                asyncio.create_task(self._send_to_admins(msg))
+            finally:
+                self._sending = False
+
+
+def setup_buffered_logging(bot: Bot):
+    root = logging.getLogger()
+
+    h = BufferingTelegramHandler(bot, TEACHER_IDS, level=logging.DEBUG)
+    h.setFormatter(logging.Formatter("%(message)s"))
+
+    root.addHandler(h)
+    # общий уровень логгера можешь оставить INFO
+    root.setLevel(logging.INFO)
+
+class TelegramLogHandler(Handler):
+    """
+    Лог-хэндлер, который отправляет сообщения в Telegram всем админам из TEACHER_IDS.
+    Работает в event loop через asyncio.create_task.
+    """
+    def __init__(self, bot: Bot, admin_ids: set[int], level=logging.ERROR):
+        super().__init__(level)
+        self.bot = bot
+        self.admin_ids = list(admin_ids)
+        self._sending = False  # защита от рекурсии
+
+    async def _send(self, text: str):
+        # режем слишком длинные сообщения
+        if len(text) > 3500:
+            text = text[:3500] + "\n…(truncated)"
+
+        for admin_id in self.admin_ids:
+            try:
+                await self.bot.send_message(
+                    admin_id,
+                    f"🐞 <b>BOT LOG</b>\n<pre>{text}</pre>",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                # тут не логируем, чтобы не уйти в рекурсию
+                pass
+
+    def emit(self, record: logging.LogRecord):
+        if self._sending:
+            return
+        try:
+            msg = self.format(record)
+            self._sending = True
+            asyncio.create_task(self._send(msg))
+        finally:
+            self._sending = False
+
+
+def setup_telegram_logging(bot: Bot):
+    # root logger
+    root = logging.getLogger()
+    tg_handler = TelegramLogHandler(bot, TEACHER_IDS, level=logging.ERROR)
+    tg_handler.setFormatter(logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(name)s\n%(message)s"
+    ))
+    root.addHandler(tg_handler)
+    root.setLevel(logging.INFO)
+
+
+
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 dp.include_router(router)
+
+setup_buffered_logging(bot)
+logging.info("✅ Buffered logging enabled: /logs доступен админам")
+
+
+setup_telegram_logging(bot)
+logging.error("✅ Telegram error-logger подключен (будет слать ERROR/EXCEPTION в TEACHER_IDS)")
+
 
 DB_PATH = "data/LEA_it_bot.db"
 
@@ -425,6 +557,69 @@ async def cancel_page_callback(callback_query: CallbackQuery, state: FSMContext)
     keyboard, _ = create_cancel_students_keyboard(students, page=page)  # :contentReference[oaicite:1]{index=1}
     await callback_query.message.edit_reply_markup(reply_markup=keyboard)
     await callback_query.answer(f"Страница {page + 1}")
+
+
+@router.message(Command("logs"))
+async def cmd_logs(message: Message):
+    if message.from_user.id not in TEACHER_IDS:
+        return
+
+    parts = (message.text or "").split()
+    n = 80
+    if len(parts) > 1 and parts[1].isdigit():
+        n = max(1, min(300, int(parts[1])))
+
+    lines = list(LOG_BUFFER)[-n:]
+    text = "\n\n".join(lines) if lines else "Лог-буфер пуст."
+
+    # телега ограничивает размер — режем
+    if len(text) > 3500:
+        text = text[-3500:]
+        text = "…(tail)\n" + text
+
+    await message.answer(f"🧾 <b>Последние логи ({len(lines)})</b>\n<pre>{_escape_html(text)}</pre>",
+                         parse_mode="HTML")
+
+
+@router.message(Command("loglevel"))
+async def cmd_loglevel(message: Message):
+    global LOG_LEVEL_FOR_BUFFER
+    if message.from_user.id not in TEACHER_IDS:
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) < 2:
+        await message.answer("Использование: /loglevel DEBUG|INFO|WARNING|ERROR")
+        return
+
+    lvl = parts[1].upper()
+    mapping = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+    }
+    if lvl not in mapping:
+        await message.answer("Неверный уровень. DEBUG|INFO|WARNING|ERROR")
+        return
+
+    LOG_LEVEL_FOR_BUFFER = mapping[lvl]
+    await message.answer(f"✅ Теперь в буфер складываем начиная с уровня: {lvl}")
+
+
+@router.message(Command("logtail"))
+async def cmd_logtail(message: Message):
+    global LOG_TAIL_ENABLED
+    if message.from_user.id not in TEACHER_IDS:
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) < 2 or parts[1].lower() not in ("on", "off"):
+        await message.answer("Использование: /logtail on|off")
+        return
+
+    LOG_TAIL_ENABLED = (parts[1].lower() == "on")
+    await message.answer(f"✅ LOG TAIL: {'включен' if LOG_TAIL_ENABLED else 'выключен'}")
 
 
 # --- Выбор ученика для отмены ---
@@ -6459,7 +6654,7 @@ async def reject_request_callback(callback_query: CallbackQuery):
 
 from datetime import date
 import sqlite3
-import logging
+
 
 def cleanup_old_requests():
     today = date.today().isoformat()
