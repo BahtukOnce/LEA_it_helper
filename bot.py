@@ -6221,11 +6221,14 @@ async def back_to_requests_list(callback_query: CallbackQuery):
 
 
 
-@router.callback_query(lambda c: c.data.startswith(APPROVE_REQUEST_PREFIX))
+# ====== APPROVE / REJECT transfer requests (FIXED) ======
+
+@router.callback_query(lambda c: c.data and c.data.startswith(APPROVE_REQUEST_PREFIX))
 async def approve_request_callback(callback_query: CallbackQuery):
     # approve_req_{req_id}_{page}_{student_id}
     try:
-        await callback_query.answer("⏳ Обрабатываю.")
+        # закрываем "крутилку"
+        await callback_query.answer("⏳ Обрабатываю...")
 
         tail = callback_query.data[len(APPROVE_REQUEST_PREFIX):]
         parts = tail.split("_")
@@ -6234,6 +6237,7 @@ async def approve_request_callback(callback_query: CallbackQuery):
         page = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
         student_id = parts[2] if len(parts) > 2 else ""
 
+        # 1) подтверждаем в БД
         r = approve_transfer_request(req_id)
         if not r:
             await callback_query.message.edit_text(
@@ -6247,44 +6251,16 @@ async def approve_request_callback(callback_query: CallbackQuery):
             )
             return
 
-        # уведомление ученику
+        # 2) уведомляем ученика (если можем)
         try:
-            tg_id = int(r["telegram_id"])
-            d = date.fromisoformat(r["new_date"]) if r.get("new_date") else None
-
-            if r["change_kind"] == "cancel":
-                # разовая отмена
-                await notify_one_time_change(
-                    student_telegram_id=tg_id,
-                    change_date=d,
-                    new_time=r["old_time"],          # для текста (время "было")
-                    old_weekday=int(r["old_weekday"]),
-                    old_time=r["old_time"],
-                    is_cancellation=True
-                )
-            elif r["change_kind"] == "one_time":
-                # разовый перенос
-                await notify_one_time_change(
-                    student_telegram_id=tg_id,
-                    change_date=d,
-                    new_time=r["new_time"],
-                    old_weekday=int(r["old_weekday"]),
-                    old_time=r["old_time"],
-                    is_cancellation=False
-                )
-            elif r["change_kind"] == "permanent":
-                # перенос на постоянной основе (weekday берём из new_date.weekday())
-                new_weekday = d.weekday() if d else int(r["old_weekday"])
-                await notify_student_about_schedule_change(
-                    student_telegram_id=tg_id,
-                    new_weekday=new_weekday,
-                    new_time=r["new_time"],
-                    old_weekday=int(r["old_weekday"]),
-                    old_time=r["old_time"],
-                )
+            await bot.send_message(
+                int(r["telegram_id"]),
+                "✅ Преподаватель одобрил ваш запрос на перенос/отмену занятия."
+            )
         except Exception:
             logging.exception("Failed to notify student about approved request")
 
+        # 3) обновляем сообщение учителя
         await callback_query.message.edit_text(
             "✅ Запрос успешно одобрен.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -6303,7 +6279,7 @@ async def approve_request_callback(callback_query: CallbackQuery):
             pass
 
 
-@router.callback_query(lambda c: c.data.startswith(REJECT_REQUEST_PREFIX))
+@router.callback_query(lambda c: c.data and c.data.startswith(REJECT_REQUEST_PREFIX))
 async def reject_request_callback(callback_query: CallbackQuery):
     # reject_req_{req_id}_{page}_{student_id}
     try:
@@ -6316,6 +6292,7 @@ async def reject_request_callback(callback_query: CallbackQuery):
         page = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
         student_id = parts[2] if len(parts) > 2 else ""
 
+        # 1) отклоняем в БД
         r = reject_transfer_request(req_id)
         if not r:
             await callback_query.message.edit_text(
@@ -6329,7 +6306,7 @@ async def reject_request_callback(callback_query: CallbackQuery):
             )
             return
 
-        # уведомление ученику об отклонении
+        # 2) уведомляем ученика (если можем)
         try:
             await bot.send_message(
                 int(r["telegram_id"]),
@@ -6338,6 +6315,7 @@ async def reject_request_callback(callback_query: CallbackQuery):
         except Exception:
             logging.exception("Failed to notify student about rejected request")
 
+        # 3) обновляем сообщение учителя
         await callback_query.message.edit_text(
             "🚫 Запрос отклонён.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -6354,6 +6332,7 @@ async def reject_request_callback(callback_query: CallbackQuery):
             await callback_query.answer("Ошибка при обработке (см. логи).", show_alert=True)
         except Exception:
             pass
+
 
 
 
