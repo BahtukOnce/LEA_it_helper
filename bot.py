@@ -6335,6 +6335,14 @@ async def reject_request_callback(callback_query: CallbackQuery):
 
 
 
+@router.callback_query(lambda c: c.data == "page_info")
+async def page_info_callback(callback_query: CallbackQuery):
+    await callback_query.answer()  # можно show_alert=False по умолчанию
+
+
+@router.callback_query(lambda c: c.data == "page_info")
+async def page_info_callback(callback_query: CallbackQuery):
+    await callback_query.answer("Это индикатор страницы 🙂", show_alert=True)
 
 
 
