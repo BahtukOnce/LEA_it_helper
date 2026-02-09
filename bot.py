@@ -6227,32 +6227,61 @@ async def back_to_requests_list(callback_query: CallbackQuery):
 @router.callback_query(lambda c: c.data and c.data.startswith(APPROVE_REQUEST_PREFIX))
 async def approve_request_callback(callback_query: CallbackQuery):
     # approve_req_{req_id}_{page}_{student_id}
+    tail = callback_query.data[len(APPROVE_REQUEST_PREFIX):]
+    parts = tail.split("_")
+
     try:
-        # закрываем "крутилку"
-        await callback_query.answer("⏳ Обрабатываю...")
-
-        tail = callback_query.data[len(APPROVE_REQUEST_PREFIX):]
-        parts = tail.split("_")
-
         req_id = int(parts[0])
-        page = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-        student_id = parts[2] if len(parts) > 2 else ""
+    except Exception:
+        # даже если что-то сломано — просто закроем "крутилку"
+        try:
+            await callback_query.answer("Ошибка: некорректный запрос.", show_alert=True)
+        except Exception:
+            pass
+        return
 
-        # 1) подтверждаем в БД
+    page = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+    student_id = parts[2] if len(parts) > 2 else ""
+
+    back_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="⬅️ Назад к списку",
+            callback_data=f"back_to_requests_list_{page}_{student_id}"
+        )
+    ]])
+
+    # 1) СРАЗУ показываем “обрабатываю” прямо в сообщении + отключаем кнопки,
+    # чтобы пользователь видел реакцию даже если callback.answer уже “одноразовый”.
+    try:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    try:
+        await callback_query.message.edit_text(
+            (callback_query.message.text or "") + "\n\n⏳ Обрабатываю...",
+            reply_markup=None
+        )
+    except Exception:
+        # если текст редактировать нельзя — не критично, продолжим обработку
+        pass
+
+    try:
         r = approve_transfer_request(req_id)
         if not r:
-            await callback_query.message.edit_text(
-                "❌ Ошибка: запрос не найден или уже обработан.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(
-                        text="⬅️ Назад к списку",
-                        callback_data=f"back_to_requests_list_{page}_{student_id}"
-                    )
-                ]])
-            )
+            try:
+                await callback_query.message.edit_text(
+                    "❌ Ошибка: запрос не найден или уже обработан.",
+                    reply_markup=back_kb
+                )
+            finally:
+                try:
+                    await callback_query.answer()
+                except Exception:
+                    pass
             return
 
-        # 2) уведомляем ученика (если можем)
+        # уведомляем ученика (если можем)
         try:
             await bot.send_message(
                 int(r["telegram_id"]),
@@ -6261,53 +6290,86 @@ async def approve_request_callback(callback_query: CallbackQuery):
         except Exception:
             logging.exception("Failed to notify student about approved request")
 
-        # 3) обновляем сообщение учителя
+        # финальное сообщение учителю
         await callback_query.message.edit_text(
             "✅ Запрос успешно одобрен.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(
-                    text="⬅️ Назад к списку",
-                    callback_data=f"back_to_requests_list_{page}_{student_id}"
-                )
-            ]])
+            reply_markup=back_kb
         )
+
+        await callback_query.answer()
 
     except Exception:
         logging.exception("approve_request_callback failed")
+        # ВАЖНО: не пытаемся второй раз answer(show_alert=True), если уже ответили ранее.
         try:
-            await callback_query.answer("Ошибка при обработке (см. логи).", show_alert=True)
+            await callback_query.message.edit_text(
+                "❌ Ошибка при обработке запроса. Проверь логи (approve_request_callback).",
+                reply_markup=back_kb
+            )
         except Exception:
             pass
+        try:
+            await callback_query.answer()
+        except Exception:
+            pass
+
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith(REJECT_REQUEST_PREFIX))
 async def reject_request_callback(callback_query: CallbackQuery):
     # reject_req_{req_id}_{page}_{student_id}
+    tail = callback_query.data[len(REJECT_REQUEST_PREFIX):]
+    parts = tail.split("_")
+
     try:
-        await callback_query.answer("⏳ Обрабатываю...")
-
-        tail = callback_query.data[len(REJECT_REQUEST_PREFIX):]
-        parts = tail.split("_")
-
         req_id = int(parts[0])
-        page = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-        student_id = parts[2] if len(parts) > 2 else ""
+    except Exception:
+        try:
+            await callback_query.answer("Ошибка: некорректный запрос.", show_alert=True)
+        except Exception:
+            pass
+        return
 
-        # 1) отклоняем в БД
+    page = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+    student_id = parts[2] if len(parts) > 2 else ""
+
+    back_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="⬅️ Назад к списку",
+            callback_data=f"back_to_requests_list_{page}_{student_id}"
+        )
+    ]])
+
+    # показываем прогресс и отключаем кнопки
+    try:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    try:
+        await callback_query.message.edit_text(
+            (callback_query.message.text or "") + "\n\n⏳ Обрабатываю...",
+            reply_markup=None
+        )
+    except Exception:
+        pass
+
+    try:
         r = reject_transfer_request(req_id)
         if not r:
-            await callback_query.message.edit_text(
-                "❌ Ошибка: запрос не найден или уже обработан.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(
-                        text="⬅️ Назад к списку",
-                        callback_data=f"back_to_requests_list_{page}_{student_id}"
-                    )
-                ]])
-            )
+            try:
+                await callback_query.message.edit_text(
+                    "❌ Ошибка: запрос не найден или уже обработан.",
+                    reply_markup=back_kb
+                )
+            finally:
+                try:
+                    await callback_query.answer()
+                except Exception:
+                    pass
             return
 
-        # 2) уведомляем ученика (если можем)
+        # уведомляем ученика
         try:
             await bot.send_message(
                 int(r["telegram_id"]),
@@ -6316,23 +6378,27 @@ async def reject_request_callback(callback_query: CallbackQuery):
         except Exception:
             logging.exception("Failed to notify student about rejected request")
 
-        # 3) обновляем сообщение учителя
         await callback_query.message.edit_text(
             "🚫 Запрос отклонён.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(
-                    text="⬅️ Назад к списку",
-                    callback_data=f"back_to_requests_list_{page}_{student_id}"
-                )
-            ]])
+            reply_markup=back_kb
         )
+
+        await callback_query.answer()
 
     except Exception:
         logging.exception("reject_request_callback failed")
         try:
-            await callback_query.answer("Ошибка при обработке (см. логи).", show_alert=True)
+            await callback_query.message.edit_text(
+                "❌ Ошибка при обработке запроса. Проверь логи (reject_request_callback).",
+                reply_markup=back_kb
+            )
         except Exception:
             pass
+        try:
+            await callback_query.answer()
+        except Exception:
+            pass
+
 
 
 
