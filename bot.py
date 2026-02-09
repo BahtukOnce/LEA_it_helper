@@ -1166,6 +1166,11 @@ class FeedbackStates(StatesGroup):
     waiting_text = State()
 
 
+class AdminFeedbackStates(StatesGroup):
+    waiting_text = State()
+
+
+
 @router.callback_query(
     lambda c: c.data.startswith("hw_student_"),
     HomeworkStates.choosing_student_smart
@@ -10567,6 +10572,61 @@ async def start_feedback(message: Message, state: FSMContext):
         parse_mode="HTML",
         reply_markup=back_keyboard(),
     )
+
+@router.message(lambda m: (m.text or "").strip() == ADMIN_FEEDBACK_TEXT)
+async def start_admin_feedback(message: Message, state: FSMContext):
+    if not is_teacher(message):
+        await message.answer("Эта команда только для преподавателя/админа.")
+        return
+
+    await state.set_state(AdminFeedbackStates.waiting_text)
+    await message.answer(
+        "🛠️ Напишите ваше замечание/предложение одним сообщением.\n"
+        "Я сохраню это и отправлю всем админам.\n\n"
+        f"Чтобы отменить — нажмите «{BACK_TEXT}».",
+        reply_markup=back_keyboard()
+    )
+
+
+@router.message(AdminFeedbackStates.waiting_text)
+async def admin_feedback_wait_text(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+
+    if text == BACK_TEXT:
+        await state.clear()
+        await message.answer("Ок, отменил. Возвращаю в главное меню.", reply_markup=main_menu_keyboard(message))
+        return
+
+    if not text:
+        await message.answer("Похоже, сообщение пустое. Напиши текст одним сообщением 🙂")
+        return
+
+    # сохраняем в БД (используем существующую таблицу feedback)
+    add_feedback(
+        telegram_id=message.from_user.id,
+        role="admin",
+        text=text
+    )
+
+    # рассылаем всем админам
+    sender_name = message.from_user.full_name
+    notify_text = (
+        "🛠️ <b>Замечание/предложение от админа</b>\n\n"
+        f"👤 <b>От:</b> {sender_name} (ID={message.from_user.id})\n\n"
+        f"💬 <b>Текст:</b>\n{text}"
+    )
+
+    for admin_id in TEACHER_IDS:
+        # чтобы не дублировать отправителю — можно пропустить его
+        if admin_id == message.from_user.id:
+            continue
+        try:
+            await bot.send_message(admin_id, notify_text, parse_mode="HTML")
+        except Exception:
+            pass
+
+    await state.clear()
+    await message.answer("✅ Принято! Сохранил и отправил всем админам.", reply_markup=main_menu_keyboard(message))
 
 
 @router.message(FeedbackStates.waiting_text)
