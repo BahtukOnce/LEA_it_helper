@@ -7714,9 +7714,19 @@ async def cmd_reschedule(message: Message, state: FSMContext):
 from datetime import time as dtime
 
 def parse_time_str(t: str) -> dtime:
-    # поддерживает "9:00" и "09:00"
-    hh, mm = map(int, t.strip().split(":"))
+    """
+    Поддерживает:
+      - "9:00", "09:00"
+      - "19:00:00" (часто приходит из SQLite time())
+    """
+    t = (t or "").strip()
+    parts = t.split(":")
+    if len(parts) < 2:
+        raise ValueError(f"Bad time format: {t!r}")
+    hh = int(parts[0])
+    mm = int(parts[1])
     return dtime(hh, mm)
+
 
 
 @router.message(RescheduleStates.choosing_student)
@@ -11023,8 +11033,8 @@ def ensure_history_for_past_lessons(
                 continue
 
             try:
-                hh, mm = map(int, time_str.split(":"))
-                lesson_t = dtime(hh, mm)
+                lesson_t = parse_time_str(time_str)
+
             except Exception:
                 continue
 
@@ -11258,8 +11268,9 @@ async def reminder_loop():
 
                 time_str = wl["time"]
                 try:
-                    hh, mm = map(int, time_str.split(":"))
-                    lesson_time = dtime(hh, mm)
+                    lesson_time = parse_time_str(time_str)
+                    hh, mm = lesson_time.hour, lesson_time.minute
+
                 except Exception:
                     continue
 
@@ -12748,9 +12759,9 @@ async def send_homework_reminders():
         time_str = lesson['time']
 
         try:
-            hh, mm = map(int, time_str.split(':'))
-            lesson_time = dtime(hh, mm)
+            lesson_time = parse_time_str(time_str)
             lesson_dt = datetime.combine(today, lesson_time)
+
         except Exception:
             continue
 
