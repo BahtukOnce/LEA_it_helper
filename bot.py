@@ -4010,11 +4010,15 @@ def get_done_lessons_without_topic(min_after_start_minutes: int = 30):
     filtered = []
     for r in rows:
         try:
-            # date: YYYY-MM-DD, time: HH:MM
-            dt = datetime.strptime(f"{r['date']} {r['time']}", "%Y-%m-%d %H:%M")
+            # date: YYYY-MM-DD, time: HH:MM или HH:MM:SS
+            try:
+                dt = datetime.strptime(f"{r['date']} {r['time']}", "%Y-%m-%d %H:%M")
+            except ValueError:
+                dt = datetime.strptime(f"{r['date']} {r['time']}", "%Y-%m-%d %H:%M:%S")
         except Exception:
             # если в данных вдруг мусор — просто пропускаем
             continue
+
 
         if dt <= cutoff:
             filtered.append(r)
