@@ -1055,7 +1055,9 @@ async def history_select_student(callback_query: CallbackQuery, state: FSMContex
         await callback_query.answer("Ученик не найден")
         return
 
+    ensure_history_for_past_lessons(lookback_days=14, min_after_start_minutes=30)
     rows = get_lesson_history_for_student(student["id"], limit=100)
+
     if not rows:
         student_name = student["full_name"] or student["username"] or str(student["telegram_id"])
         await callback_query.message.edit_text(
@@ -8008,7 +8010,9 @@ async def cmd_myhistory(message: Message):
         await message.answer("Я тебя ещё не знаю. Напиши /start.")
         return
 
+    ensure_history_for_past_lessons(lookback_days=14, min_after_start_minutes=30)
     rows = get_lesson_history_for_student(student["id"], limit=20)
+
     if not rows:
         await message.answer("История занятий пока пустая.")
         return
